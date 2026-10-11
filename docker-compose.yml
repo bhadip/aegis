@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  aegis-mt5:
+    image: aegis-mt5-server:latest
+    container_name: aegis-mt5
+    restart: unless-stopped
+    ports:
+      - "9091:3000"
+    volumes:
+      # Fix: Use /config/.wine path (linuxserver.io standard)
+      - /home/tom/mql-zmq/Include/Zmq:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Zmq:ro
+      - /home/tom/mql-zmq/Include/Mql:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Mql:ro
+      - /home/tom/aegis/mt5_ea/AEGIS_Captain.mq5:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/AEGIS_Captain.mq5:ro
+      - aegis-mt5-data:/config/.wine/drive_c/Program Files/MetaTrader 5
+    networks:
+      - aegis-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  aegis-bridge:
+    build: ./bridge
+    container_name: aegis-bridge
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - MT5_ZMQ_PORT=5555
+    volumes:
+      - ./bridge:/app
+      - ./web-ui:/app/web-ui
+    networks:
+      - aegis-net
+    depends_on:
+      - aegis-mt5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  aegis-news:
+    build: ./news-agent
+    container_name: aegis-news
+    restart: unless-stopped
+    environment:
+      - NEWS_SCAN_SCHEDULE=${NEWS_SCAN_SCHEDULE:-0 8 * * *}
+      - BRIDGE_API_URL=http://aegis-bridge:8000
+    volumes:
+      - ./news-agent:/app
+    networks:
+      - aegis-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+networks:
+  aegis-net:
+    driver: bridge
+
+volumes:
+  aegis-mt5-data:

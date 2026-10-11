@@ -1,0 +1,8 @@
+{
+  "branding": {
+    "logo_url": "https://via.placeholder.com/40",
+    "app_name": "ExaGuard AEGIS",
+    "tagline": "Autonomous Execution & Grid Intelligence System"
+  },
+  "api_base_url": "http://100.75.220.84:8000"
+}
