@@ -9,11 +9,11 @@
 CTrade trade;
 
 input double InpBaseLotSize = 0.01;
-input int    InpGridDistance = 50;
+input int    InpGridDistance = 10000;
 input double InpEquityMultiplier = 2500;
 
 double CurrentLot = 0.01;
-int CurrentGridDistance = 50;
+int CurrentGridDistance = 10000;
 double CurrentEquityMultiplier = 2500;
 int TPLowRisk = 20;
 int TPMedRisk = 15;
@@ -23,6 +23,7 @@ int CurrentRiskScore = 50;
 int magicNumber = 88888;
 string serverURL = "http://100.75.220.84:8000";
 int lastMinute = -1;
+int rsiHandle;
 
 int OnInit() {
    trade.SetExpertMagicNumber(magicNumber);
@@ -30,6 +31,13 @@ int OnInit() {
    CurrentGridDistance = InpGridDistance;
    CurrentEquityMultiplier = InpEquityMultiplier;
    EventSetTimer(5);
+   
+   rsiHandle = iRSI(_Symbol, PERIOD_M5, 14, PRICE_CLOSE);
+   if(rsiHandle == INVALID_HANDLE) {
+      Print("Failed to create RSI indicator");
+      return INIT_FAILED;
+   }
+   
    Print("AEGIS Captain EA Initialized - Version 0.1");
    return INIT_SUCCEEDED;
 }
@@ -52,7 +60,6 @@ void OnTimer() {
    
    if(margin_level == 0) margin_level = 99999;
 
-   // Use GET request with query parameters (much more reliable in MQL5/Wine)
    string statusUrl = serverURL + "/api/v1/ea/status?equity=" + DoubleToString(equity, 2) + 
                       "&balance=" + DoubleToString(balance, 2) + 
                       "&margin_level=" + DoubleToString(margin_level, 2) + 
@@ -60,12 +67,6 @@ void OnTimer() {
    
    int resPost = WebRequest("GET", statusUrl, headers, 2000, postData, result, headers);
    
-   if(resPost != 200) {
-      Print("DEBUG: Status GET failed. Code: ", resPost);
-   } else {
-      Print("DEBUG: Status sent successfully. Equity: ", equity);
-   }
-
    int currentMinute = (int)(TimeCurrent() / 60);
    if(currentMinute != lastMinute) {
       lastMinute = currentMinute;
@@ -78,6 +79,8 @@ void ExecuteBasketLogic() {
    double ml = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
    if(ml == 0) ml = 99999;
    
+   // Count both open positions and pending orders to prevent over-exposure
+   int totalExposure = PositionsTotal() + OrdersTotal();
    int maxPositions = (int)MathFloor(equity / CurrentEquityMultiplier);
    
    if(ml < 1000) {
@@ -85,7 +88,6 @@ void ExecuteBasketLogic() {
       return;
    }
 
-   int totalExposure = PositionsTotal();
    double lowestPrice = DBL_MAX;
    int openCount = 0;
    double totalFloatingPoints = 0;
@@ -100,6 +102,7 @@ void ExecuteBasketLogic() {
       }
    }
 
+   // BASKET EXIT LOGIC
    int targetTP = (CurrentRiskScore < 40) ? TPLowRisk : ((CurrentRiskScore < 70) ? TPMedRisk : TPHighRisk);
    if(openCount > 0 && (totalFloatingPoints / openCount) >= targetTP) {
       Print("BASKET TP REACHED: Closing all positions");
@@ -112,37 +115,48 @@ void ExecuteBasketLogic() {
       return;
    }
 
+   // ENTRY LOGIC
    if(totalExposure < maxPositions) {
-      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      // FIX: Get broker stop level to prevent invalid price errors
-      double stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
-      if(stopLevel == 0) stopLevel = 10 * _Point;
       
-      double entryPrice = (lowestPrice == DBL_MAX) ? ask - CurrentGridDistance * _Point : lowestPrice - CurrentGridDistance * _Point;
-      
-      // FIX: Ensure Buy Limit is strictly below ASK and respects stop level
-      if(entryPrice >= ask - stopLevel) {
-         entryPrice = ask - stopLevel - (10 * _Point);
-      }
-      
-      bool exists = false;
-      int ordersTotal = OrdersTotal();
-      for(int i = 0; i < ordersTotal; i++) {
-         ulong ticket = OrderGetTicket(i);
-         if(ticket > 0) {
-            string orderSymbol = OrderGetString(ORDER_SYMBOL);
-            if(orderSymbol == _Symbol && MathAbs(OrderGetDouble(ORDER_PRICE_OPEN) - entryPrice) < _Point) {
-               exists = true;
-               break;
+      if(PositionsTotal() == 0) {
+         // RULE 1: INITIAL ENTRY - Market Buy when RSI < 30
+         double rsiBuffer[];
+         ArraySetAsSeries(rsiBuffer, true);
+         if(CopyBuffer(rsiHandle, 0, 0, 1, rsiBuffer) > 0) {
+            if(rsiBuffer[0] < 30.0) {
+               if(trade.Buy(CurrentLot, _Symbol, 0, 0, 0, "AEGIS Initial RSI Entry")) {
+                  Print("Opened Initial Buy at Market. RSI: ", rsiBuffer[0]);
+               }
             }
          }
-      }
-      
-      if(!exists) {
-         if(trade.BuyLimit(CurrentLot, entryPrice, _Symbol, 0, 0, ORDER_TIME_GTC, 0, "AEGIS Grid")) {
-            Print("Placed Buy Limit at ", entryPrice);
-         } else {
-            Print("Failed to place Buy Limit at ", entryPrice, " Error: ", trade.ResultRetcodeDescription());
+      } else {
+         // RULE 2: GRID ENTRY - Buy Limit 10,000 points below lowest open position
+         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double stopLevel = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * _Point;
+         if(stopLevel == 0) stopLevel = 10 * _Point;
+         
+         double nextGridPrice = lowestPrice - (CurrentGridDistance * _Point);
+         
+         // Ensure the limit price is valid (below current ASK - stop level)
+         if(nextGridPrice < ask - stopLevel) {
+            bool exists = false;
+            int ordersTotal = OrdersTotal();
+            for(int i = 0; i < ordersTotal; i++) {
+               ulong ticket = OrderGetTicket(i);
+               if(ticket > 0) {
+                  string orderSymbol = OrderGetString(ORDER_SYMBOL);
+                  if(orderSymbol == _Symbol && MathAbs(OrderGetDouble(ORDER_PRICE_OPEN) - nextGridPrice) < _Point) {
+                     exists = true;
+                     break;
+                  }
+               }
+            }
+            
+            if(!exists) {
+               if(trade.BuyLimit(CurrentLot, nextGridPrice, _Symbol, 0, 0, ORDER_TIME_GTC, 0, "AEGIS Grid")) {
+                  Print("Placed Grid Buy Limit at ", nextGridPrice);
+               }
+            }
          }
       }
    }
