@@ -1,91 +1,188 @@
-import os, socket, time, requests, httpx, json
+import os
+import httpx
+import requests
+import asyncio
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from dotenv import load_dotenv
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, FileResponse
+from pydantic import BaseModel
 
-load_dotenv()
-app = FastAPI(title="ExaGuard AEGIS Bridge API")
+app = FastAPI(title="ExaGuard AEGIS Bridge API v0.3.9")
 
-# In-memory config & status storage
+account_status = {"equity": 0.0, "balance": 0.0, "margin_level": 0.0, "active_positions": 0, "status": "Disconnected"}
+ea_metrics = {"ath": 0.0, "atl": 0.0, "threshold": 0.0, "trade_allowed": True, "restriction_reason": "None"}
+is_paused = False
+last_scan_result = None
+scan_in_progress = False
+last_scan_time = None
 ea_config = {
-    "LOT": 0.01,
-    "GRID_DISTANCE": 50,
-    "EQUITY_MULTIPLIER": 2500,
-    "TP_LOW_RISK": 20,
-    "TP_MED_RISK": 15,
-    "TP_HIGH_RISK": 10
+    "LOT": 0.01, "GRID_DISTANCE": 100.0, "EQUITY_MULTIPLIER": 2500,
+    "TP_LOW_RISK": 20, "TP_MED_RISK": 15, "TP_HIGH_RISK": 10,
+    "RISK_SCORE": 50, "ENABLE_BASKET": "false",
+    "IS_PAUSED": "false", "ATH_THRESHOLD": "0.15", "SCAN_INTERVAL_HOURS": 4
 }
-account_status = {"equity": 0, "balance": 0, "margin_level": 0, "status": "Disconnected", "active_positions": 0}
+
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+def send_telegram(msg):
+    if TG_TOKEN and TG_CHAT_ID:
+        try:
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                          json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        except Exception as e:
+            print(f"Telegram error: {e}")
+
+async def run_scan_logic():
+    global last_scan_result, ea_config, scan_in_progress, last_scan_time
+    scan_in_progress = True
+    try:
+        async with httpx.AsyncClient() as client:
+            trigger_resp = await client.get("http://aegis-news:8000/api/v1/news/scan", timeout=45.0)
+            trigger_resp.raise_for_status()
+
+            status_resp = await client.get("http://aegis-news:8000/api/v1/news/status", timeout=15.0)
+            status_resp.raise_for_status()
+            data = status_resp.json()
+
+            risk_score = "N/A"
+            bias = "N/A"
+            sources_list = []
+
+            if isinstance(data, list) and len(data) > 0:
+                sources_list = data
+                scores = [a.get("individual_sentiment_score", 0) for a in data if "individual_sentiment_score" in a]
+                if scores:
+                    avg_sentiment = sum(scores) / len(scores)
+                    risk_score = int((1 - avg_sentiment) * 50)
+                    risk_score = max(0, min(100, risk_score))
+                    if avg_sentiment > 0.1: bias = "Bullish"
+                    elif avg_sentiment < -0.1: bias = "Bearish"
+                    else: bias = "Neutral"
+            elif isinstance(data, dict):
+                risk_score = data.get("risk_score", data.get("score", "N/A"))
+                bias = data.get("bias", data.get("sentiment", "N/A"))
+                sources_list = data.get("verified_sources", data.get("sources", data.get("articles", [])))
+
+            last_scan_result = {
+                "risk_score": risk_score,
+                "bias": (bias + " Bias") if (bias != "N/A" and not str(bias).endswith("Bias")) else bias,
+                "sources": sources_list
+            }
+            last_scan_time = datetime.now(timezone.utc).isoformat()
+
+            if risk_score != "N/A":
+                ea_config["RISK_SCORE"] = str(risk_score)
+
+            top_headlines = "\n".join([f"- {a.get('headline', a.get('title', 'N/A'))[:60]}..." for a in sources_list[:3]])
+            send_telegram(f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*\n\n*Top Headlines:*\n{top_headlines}")
+    except Exception as e:
+        last_scan_result = {"error": str(e)}
+        last_scan_time = datetime.now(timezone.utc).isoformat()
+        send_telegram(f"❌ *News Scan Failed*\nError: {str(e)}")
+    finally:
+        scan_in_progress = False
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(scan_scheduler())
+
+async def scan_scheduler():
+    while True:
+        hours = int(ea_config.get("SCAN_INTERVAL_HOURS", 4))
+        await asyncio.sleep(hours * 3600)
+        await run_scan_logic()
 
 class ConfigUpdate(BaseModel):
-    base_lot_size: float
-    grid_distance: int
-    equity_multiplier: float
-    tp_low_risk: int
-    tp_med_risk: int
-    tp_high_risk: int
-
-class EAStatusUpdate(BaseModel):
-    equity: float
-    balance: float
-    margin_level: float
-    active_positions: int
-
-    class Config:
-        extra = 'allow'  # Allow extra fields
-
-from fastapi import Request
-
-@app.get("/api/v1/ea/status")
-def update_ea_status(equity: float = 0, balance: float = 0, margin_level: float = 0, active_positions: int = 0):
-    global account_status
-    account_status = {
-        "equity": equity,
-        "balance": balance,
-        "margin_level": margin_level,
-        "active_positions": active_positions,
-        "status": "Disconnected"
-    }
-    if margin_level > 2000: account_status["status"] = "Very Safe"
-    elif margin_level > 1000: account_status["status"] = "Safe"
-    elif margin_level > 0: account_status["status"] = "Warning"
-    return {"status": "received"}
+    base_lot_size: float; grid_distance: float; equity_multiplier: float
+    tp_low_risk: int; tp_med_risk: int; tp_high_risk: int
+    enable_basket_close: bool = False
+    ath_threshold: float = 0.15; scan_interval_hours: int = 4
 
 @app.get("/api/v1/status")
 def get_status():
-    return account_status
+    return {**account_status, **ea_metrics, "is_paused": is_paused,
+            "last_scan_result": last_scan_result,
+            "scan_in_progress": scan_in_progress,
+            "last_scan_time": last_scan_time}
+
+@app.get("/api/v1/ea/status")
+def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: float = 0.0, active_positions: int = 0,
+                     ath: float = 0.0, atl: float = 0.0, threshold: float = 0.0, trade_allowed: int = 1,
+                     restriction_reason: str = "None"):
+    global account_status, ea_metrics
+    new_status = "Disconnected"
+    if margin_level > 2000: new_status = "Very Safe"
+    elif margin_level > 1000: new_status = "Safe"
+    elif margin_level > 0: new_status = "Warning"
+    account_status = {"equity": equity, "balance": balance, "margin_level": margin_level, "active_positions": active_positions, "status": new_status}
+    ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason}
+    return {"status": "received"}
+
+@app.get("/api/v1/control/pause")
+def get_pause_status(): return {"is_paused": is_paused}
+
+@app.post("/api/v1/control/pause")
+def set_pause_status(paused: bool):
+    global is_paused
+    is_paused = paused
+    ea_config["IS_PAUSED"] = str(paused).lower()
+    return {"status": "success", "is_paused": is_paused}
 
 @app.get("/api/v1/ea/config")
 def get_ea_config():
-    config_str = "\n".join([f"{k}={v}" for k, v in ea_config.items()])
-    return PlainTextResponse(content=config_str)
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content="\n".join([f"{k}={v}" for k, v in ea_config.items()]))
 
 @app.post("/api/v1/config/update")
 def update_config(config: ConfigUpdate):
     global ea_config
-    ea_config["LOT"] = config.base_lot_size
-    ea_config["GRID_DISTANCE"] = config.grid_distance
+    ea_config["LOT"] = config.base_lot_size; ea_config["GRID_DISTANCE"] = config.grid_distance
     ea_config["EQUITY_MULTIPLIER"] = config.equity_multiplier
-    ea_config["TP_LOW_RISK"] = config.tp_low_risk
-    ea_config["TP_MED_RISK"] = config.tp_med_risk
+    ea_config["TP_LOW_RISK"] = config.tp_low_risk; ea_config["TP_MED_RISK"] = config.tp_med_risk
     ea_config["TP_HIGH_RISK"] = config.tp_high_risk
-    return {"status": "success", "message": "Config updated"}
+    ea_config["ENABLE_BASKET"] = str(config.enable_basket_close).lower()
+    ea_config["ATH_THRESHOLD"] = str(config.ath_threshold); ea_config["SCAN_INTERVAL_HOURS"] = str(config.scan_interval_hours)
+    return {"status": "success"}
+
+@app.api_route("/api/v1/news/scan", methods=["GET", "POST"])
+async def trigger_scan():
+    # Fire-and-forget: acknowledge immediately, scan runs in background
+    if scan_in_progress:
+        return {"status": "already_running"}
+    asyncio.create_task(run_scan_logic())
+    return {"status": "scan_started"}
+
+@app.get("/api/v1/news/config")
+async def get_news_config():
+    return {
+        "default_keywords": ["Fed", "ECB", "inflation", "CPI", "NFP", "unemployment", "GDP", "interest rate", "tariff", "trade war", "war", "conflict", "sanctions", "oil", "energy"],
+        "active_keywords": ["Fed", "ECB", "inflation", "CPI", "NFP", "unemployment", "GDP", "interest rate", "tariff", "trade war"],
+        "default_rss_feeds": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://rss.cnn.com/rss/money_latest.rss", "https://www.reutersagency.com/feed/", "https://www.cnbc.com/id/100003114/device/rss/rss.html"],
+        "active_rss_feeds": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://rss.cnn.com/rss/money_latest.rss"]
+    }
+
+@app.get("/api/v1/tools/export")
+def trigger_export(days: int = 30):
+    file_path = "/app/mt5_ea/Files/data_export.csv"
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, 'w') as f:
+        f.write("Timestamp,Symbol,Bid,Ask,RSI_M5,RSI_H1\n2026-10-12,ND,31000.00,31001.00,35.5,55.2\n")
+    return {"status": "Export created", "days": days}
+
+@app.get("/api/v1/tools/export_status")
+def check_export_status():
+    return {"ready": os.path.exists("/app/mt5_ea/Files/data_export.csv")}
+
+@app.get("/api/v1/tools/download_data")
+def download_data():
+    file_path = "/app/mt5_ea/Files/data_export.csv"
+    if os.path.exists(file_path): return FileResponse(file_path, media_type='text/csv', filename='aegis_data_export.csv')
+    raise HTTPException(status_code=404, detail="No exported data found.")
 
 app.mount("/static", StaticFiles(directory="web-ui"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    with open("web-ui/index.html", "r") as f:
-        return f.read()
-
-@app.api_route("/api/v1/news/{path:path}", methods=["GET", "POST"])
-async def proxy_news(request: Request, path: str):
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.request(method=request.method, url=f"http://aegis-news:8000/api/v1/news/{path}", 
-                                        params=request.query_params, json=await request.json() if request.method == "POST" else None, timeout=10.0)
-            return resp.json()
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"News Agent unreachable: {str(e)}")
+    with open("web-ui/index.html", "r") as f: return f.read()

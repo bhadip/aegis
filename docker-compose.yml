@@ -9,10 +9,11 @@ services:
       - "9091:3000"
     volumes:
       # Fix: Use /config/.wine path (linuxserver.io standard)
-      - /home/tom/mql-zmq/Include/Zmq:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Zmq:ro
-      - /home/tom/mql-zmq/Include/Mql:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Mql:ro
-      - /home/tom/aegis/mt5_ea/AEGIS_Captain.mq5:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/AEGIS_Captain.mq5:ro
+      - /home/tom/mql-zmq/Include/Zmq:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Zmq
+      - /home/tom/mql-zmq/Include/Mql:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Mql
+      - /home/tom/aegis/mt5_ea/AEGIS_Captain.mq5:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/AEGIS_Captain.mq5
       - aegis-mt5-data:/config/.wine/drive_c/Program Files/MetaTrader 5
+      - ./custom_scripts/mt4_run:/etc/services.d/mt4/run:ro
     networks:
       - aegis-net
     deploy:

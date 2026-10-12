@@ -1,100 +1,130 @@
-const { createApp } = Vue;
-createApp({
-    data() {
-        return {
-            sidebarOpen: false, currentTab: 'dashboard', userEmail: null,
-            config: { branding: { logo_url: '', app_name: 'Loading...', tagline: '' } },
-            version: '0.1.0',
-            account: { equity: 0, balance: 0, margin_level: 0, status: 'Disconnected', active_positions: 0 },
-            news: { risk_score: 0, bias: 'Neutral/Caution', primary_driver: 'None', recommendation: 'Pending', verified_sources: [] },
-            configForm: { base_lot_size: 0.01, grid_distance: 50, equity_multiplier: 2500, tp_low_risk: 20, tp_med_risk: 15, tp_high_risk: 10 },
-            newsConfig: { default_keywords: [], active_keywords: [], default_rss_feeds: [], active_rss_feeds: [], risk_threshold_low: 40, risk_threshold_high: 70 },
-            newKeyword: '', newRssUrl: '', rssValidationMsg: ''
-        }
+new Vue({
+    el: '#app',
+    data: {
+        version: '0.3.0',
+        currentTab: 'dashboard',
+        isMobileMenuOpen: false,
+        isMobileMenuOpen: false,
+        accountStatus: { equity: 0, balance: 0, margin_level: 0, status: 'Disconnected' },
+        eaMetrics: { ath: 0, atl: 0, threshold: 0, trade_allowed: true, restriction_reason: 'None' },
+        isTradingPaused: false,
+        exportPeriod: 30,
+        isExporting: false,
+        exportReady: false,
+        scanInterval: 4,
+        isScanning: false,
+        scanResult: null,
+        newsConfig: { active_keywords: [], default_keywords: [], active_rss_feeds: [], default_rss_feeds: [] },
+        eaConfig: { base_lot_size: 0.01, grid_distance: 100.0, equity_multiplier: 2500, tp_low_risk: 20, tp_med_risk: 15, tp_high_risk: 10, enable_basket_close: false, ath_threshold: 0.15, scan_interval_hours: 4 }
     },
-    mounted() { this.loadConfig(); this.fetchStatus(); this.fetchNews(); this.fetchNewsConfig(); setInterval(() => { this.fetchStatus(); this.fetchNews(); }, 5000); },
     computed: {
-        checkedKeywords() {
-            if (!this.newsConfig.default_keywords) return [];
-            return this.newsConfig.default_keywords
-                .filter(k => this.newsConfig.active_keywords.includes(k))
-                .sort((a, b) => a.localeCompare(b));
+        checkedKeywords() { 
+            const defaults = this.newsConfig.default_keywords || [];
+            const active = this.newsConfig.active_keywords || [];
+            return defaults.filter(k => active.includes(k)).sort(); 
         },
-        uncheckedKeywords() {
-            if (!this.newsConfig.default_keywords) return [];
-            return this.newsConfig.default_keywords
-                .filter(k => !this.newsConfig.active_keywords.includes(k))
-                .sort((a, b) => a.localeCompare(b));
+        uncheckedKeywords() { 
+            const defaults = this.newsConfig.default_keywords || [];
+            const active = this.newsConfig.active_keywords || [];
+            return defaults.filter(k => !active.includes(k)).sort(); 
         },
-        checkedRssFeeds() {
+        checkedRssFeeds() { 
             const defaults = this.newsConfig.default_rss_feeds || [];
-            const customs = this.newsConfig.active_rss_feeds.filter(u => !defaults.includes(u)) || [];
-            const allFeeds = [...defaults, ...customs];
-            return allFeeds
-                .filter(u => this.newsConfig.active_rss_feeds.includes(u))
-                .sort((a, b) => a.localeCompare(b));
+            const active = this.newsConfig.active_rss_feeds || [];
+            return defaults.filter(u => active.includes(u)).sort(); 
         },
-        uncheckedRssFeeds() {
+        uncheckedRssFeeds() { 
             const defaults = this.newsConfig.default_rss_feeds || [];
-            const customs = this.newsConfig.active_rss_feeds.filter(u => !defaults.includes(u)) || [];
-            const allFeeds = [...defaults, ...customs];
-            return allFeeds
-                .filter(u => !this.newsConfig.active_rss_feeds.includes(u))
-                .sort((a, b) => a.localeCompare(b));
+            const active = this.newsConfig.active_rss_feeds || [];
+            return defaults.filter(u => !active.includes(u)).sort(); 
         }
     },
     methods: {
-        toggleSidebar() { this.sidebarOpen = !this.sidebarOpen; },
-        closeSidebar() { this.sidebarOpen = false; },
-        async loadConfig() { try { this.config = (await axios.get('/static/config.json')).data; } catch (e) {} },
-        async fetchStatus() { try { this.account = (await axios.get('/api/v1/status')).data; } catch (e) {} },
-        async fetchNews() { try { this.news = (await axios.get('/api/v1/news/status')).data; } catch (e) {} },
-        async fetchNewsConfig() { 
-            try { 
-                this.newsConfig = (await axios.get('/api/v1/news/config')).data; 
-                // Ensure arrays exist
-                if(!this.newsConfig.active_keywords) this.newsConfig.active_keywords = [];
-                if(!this.newsConfig.active_rss_feeds) this.newsConfig.active_rss_feeds = [];
-            } catch (e) {} 
+        getHeadline(source) {
+            if (typeof source === 'string') return source;
+            if (source && source.headline) return source.headline;
+            if (source && source.title) return source.title;
+            return 'No headline';
         },
-        async triggerScan() { 
-            try { await axios.get('/api/v1/news/scan'); alert('✅ Scan initiated!'); setTimeout(() => { this.fetchNews(); }, 5000); } 
-            catch (e) { alert('❌ Failed to trigger scan: ' + (e.response ? e.response.data.detail : e.message)); } 
+        formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined) return '0';
+            return Number(num).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
         },
-        async saveConfig() { 
-            try { await axios.post('/api/v1/config/update', this.configForm); alert('✅ EA Configuration updated!'); } 
-            catch (e) { alert('❌ Failed to update EA config.'); } 
-        },
-        async validateRss() {
-            if(!this.newRssUrl) return;
-            this.rssValidationMsg = 'Validating...';
+        async fetchStatus() {
             try {
-                const res = await axios.post('/api/v1/news/validate_url', {url: this.newRssUrl});
-                if(res.data.valid) {
-                    this.rssValidationMsg = '✅ Valid: ' + res.data.title;
-                    this.newsConfig.active_rss_feeds.push(this.newRssUrl);
-                    this.newRssUrl = '';
-                } else {
-                    this.rssValidationMsg = '❌ Invalid: ' + res.data.error;
+                const res = await axios.get('/api/v1/status');
+                this.accountStatus = res.data;
+                this.eaMetrics = { ath: res.data.ath || 0, atl: res.data.atl || 0, threshold: res.data.threshold || 0, trade_allowed: res.data.trade_allowed !== false, restriction_reason: res.data.restriction_reason || 'None' };
+                this.isTradingPaused = res.data.is_paused || false;
+                if(res.data.last_scan_result) this.scanResult = res.data.last_scan_result;
+                if (this.isScanning) {
+                    const elapsed = Date.now() - (this._scanStartedAt || 0);
+                    if (!res.data.scan_in_progress && elapsed > 8000) this.isScanning = false;
+                    else if (elapsed > 240000) this.isScanning = false;
                 }
-            } catch(e) { this.rssValidationMsg = '❌ Validation failed.'; }
+            } catch (e) {}
         },
-        addKeyword() {
-            if(this.newKeyword && !this.newsConfig.active_keywords.includes(this.newKeyword)) {
-                this.newsConfig.active_keywords.push(this.newKeyword);
-                if(!this.newsConfig.default_keywords.includes(this.newKeyword)) {
-                    this.newsConfig.default_keywords.push(this.newKeyword);
-                }
-                this.newKeyword = '';
+        async fetchPauseStatus() {
+            try {
+                const res = await axios.get('/api/v1/control/pause');
+                this.isTradingPaused = res.data.is_paused;
+            } catch (e) {}
+        },
+        async togglePause() {
+            const newState = !this.isTradingPaused;
+            this.isTradingPaused = newState; // Optimistic update
+            try {
+                await axios.post('/api/v1/control/pause?paused=' + newState);
+            } catch (e) {
+                this.isTradingPaused = !newState; // Revert on error
             }
         },
-        async saveNewsConfig(saveDefault) {
-            try { 
-                const payload = {...this.newsConfig, save_as_default: saveDefault};
-                await axios.post('/api/v1/news/config', payload); 
-                alert(saveDefault ? '✅ News config saved as default!' : '✅ News config updated for this session!'); 
-                this.sortSelectedFirst();
-            } catch (e) { alert('❌ Failed to update news config.'); } 
+        async triggerExport() {
+            this.isExporting = true; this.exportReady = false;
+            try {
+                await axios.post('/api/v1/tools/export?days=' + this.exportPeriod);
+                this.pollExportStatus();
+            } catch (e) { this.isExporting = false; }
+        },
+        pollExportStatus() {
+            const poll = setInterval(async () => {
+                try {
+                    const res = await axios.get('/api/v1/tools/export_status');
+                    if (res.data.ready) { clearInterval(poll); this.isExporting = false; this.exportReady = true; }
+                } catch (e) { clearInterval(poll); this.isExporting = false; }
+            }, 2000);
+        },
+        downloadCSV() { window.location.href = '/api/v1/tools/download_data'; },
+        async triggerScan() {
+            this.isScanning = true;
+            this._scanStartedAt = Date.now();
+            try {
+                // Bridge acknowledges immediately; scan runs in background
+                await axios.post('/api/v1/news/scan', {}, { timeout: 15000 });
+            } catch (e) { /* ignore: status polling will report completion */ }
+        },
+        async fetchNewsConfig() {
+            try {
+                const res = await axios.get('/api/v1/news/config');
+                this.newsConfig = res.data;
+                // Ensure defaults exist for the "Inactive" list to render
+                if (!this.newsConfig.default_keywords) this.newsConfig.default_keywords = this.newsConfig.active_keywords || [];
+                if (!this.newsConfig.default_rss_feeds) this.newsConfig.default_rss_feeds = this.newsConfig.active_rss_feeds || [];
+                if (!this.newsConfig.active_keywords) this.newsConfig.active_keywords = [];
+                if (!this.newsConfig.active_rss_feeds) this.newsConfig.active_rss_feeds = [];
+            } catch (e) { console.error("Failed to load news config:", e); }
+        },
+        async saveConfig() {
+            try {
+                await axios.post('/api/v1/config/update', this.eaConfig);
+                alert('Configuration saved successfully!');
+            } catch (e) { alert('Failed to save configuration.'); }
         }
+    },
+    mounted() {
+        this.fetchStatus();
+        this.fetchPauseStatus();
+        this.fetchNewsConfig();
+        setInterval(this.fetchStatus, 2000);
     }
-}).mount('#app');
+});

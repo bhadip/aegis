@@ -1,0 +1,5 @@
+.env
+*.env
+mt5_ea/Files/
+__pycache__/
+*.pyc

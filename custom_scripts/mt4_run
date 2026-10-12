@@ -1,0 +1,5 @@
+#!/usr/bin/with-contenv bash
+# Wait for the desktop/X session to be ready
+sleep 15
+# Force software rendering and use the CORRECT 64-bit path (NO x86)
+exec su abc -c "env DISPLAY=:1 LIBGL_ALWAYS_SOFTWARE=1 /usr/lib/wine/wine64 \"/config/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe\""
