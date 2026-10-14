@@ -17,13 +17,16 @@
 
 ## Entry Trigger
 - RSI(14) hook on any of M1, M5, M15, M30: RSI_current > RSI_previous AND RSI_current < 40.
-- Grid distance filter: if any position is open, abs(price - entry_i) >= GridDistance for every open position i. Grid Distance is in price points (default 100 = 100.00).
+- Grid distance filter (v0.5.0 gradual): GridBase = clamp(ATR_H1(14) x (0.60 + 0.80 x RiskScore/100), 50, 300). Required gap for the next position = GridBase x (1 + GRID_STEP_PCT/100 x (openCount-1)), default step 25%, measured below the lowest open entry. Hence P1-P2 < P2-P3 < P3-P4.
+- GridBase clamp bounds GRID_MIN / GRID_MAX default 50 / 300. Preset for P1-P2 >= 99 and P4-P5 >= 250: GRID_MIN = 99, GRID_STEP_PCT = 51.
 - Execution: Market Buy, lot = Base Lot (0.01), hard TP on ticket, comment tag AEGIS_MTF[tf]_RSI[x]_H1[y].
 
-## Take-Profit (price points)
-- Base by News Risk Score (0-100, pushed by Bridge): <40 -> TP_LOW (20), 40-70 -> TP_MED (15), >70 -> TP_HIGH (10).
-- Adjustment: if H1 RSI in [40, 60] -> base x 0.5 (this is how TP_HIGH 10 naturally becomes 5).
-- No other floors or caps. Hard TP price = entry + targetTP, normalized to symbol digits.
+## Take-Profit (price points, v0.5.0 tiered volatility)
+- TP(tier) = clamp(ATR_H1(14) x TierMult(tier) x (1.40 - 0.80 x RiskScore/100), TPMin 5, TPMax 100).
+- TierMult = min(TP_T1_MULT + TP_TIER_STEP x (tier-1), TP_TIER_MAX); defaults 0.60 / 0.20 / 1.40: tier 1 (highest entry) = smallest TP (fastest exit); deeper tiers = larger TP (ride the rebound).
+- Clamp bounds TP_MIN / TP_MAX default 10 / 100 price points. All coefficients adjustable from Dashboard Settings.
+- Risk factor falls from 1.4 (Risk 0) to 0.6 (Risk 100): higher risk lowers TP.
+- Hard TP price = entry + TP(tier), normalized to symbol digits.
 
 ## Basket Close (default DISABLED since v0.3.9)
 - If enabled: close all magic-number positions when average floating profit (price points) >= targetTP (same calculation as above).

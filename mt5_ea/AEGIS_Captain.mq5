@@ -2,7 +2,7 @@
 //|                                      AEGIS_Captain.mq5           |
 //+------------------------------------------------------------------+
 #property copyright "ExaGuard AI"
-#property version   "0.4.0"
+#property version   "0.9.1"
 #property strict
 
 // LONG (SELL) POSITIONS ARE STRICTLY PROHIBITED. ONLY MARKET BUY IS ALLOWED.
@@ -16,15 +16,19 @@ input double InpATHThresholdPct = 0.15;
 input bool   InpUseH1RSIFilter = true;
 input double InpMinH1RSI = 30.0;
 input bool   InpEnableBasketClose = false;
-// Dynamic grid: Grid = clamp(ATR_H1 * (0.60 + 0.80*R/100), GridMin, GridMax)
 input bool   InpUseDynamicGrid = true;
-input double InpGridDistance = 100.0;   // static fallback (price pts) if dynamic off or ATR invalid
+input double InpGridDistance = 100.0;   // static fallback (price pts)
 input int    InpATRPeriod = 14;
-input double InpGridMin = 50.0;
-input double InpGridMax = 300.0;
-// Tiered volatility TP: TP(t) = clamp(ATR_H1 * TierMult(t) * (1.40 - 0.80*R/100), TPMin, TPMax)
-input double InpTPMin = 5.0;
-input double InpTPMax = 100.0;
+// Gradual grid coefficients (also adjustable from Dashboard Settings)
+input double InpGridMin = 50.0;         // floor for grid base G
+input double InpGridMax = 300.0;        // cap for grid base G
+input double InpGridStepPct = 25.0;     // extra % per tier: gap(k) = G * (1 + step/100*(k-1))
+// Tiered TP coefficients (also adjustable from Dashboard Settings)
+input double InpTPMin = 10.0;           // TP floor (price pts)
+input double InpTPMax = 100.0;          // TP cap (price pts)
+input double InpTPMult1 = 0.60;         // tier-1 multiplier (smallest, fastest exit)
+input double InpTPStep = 0.20;          // multiplier added per tier
+input double InpTPMultMax = 1.40;       // multiplier cap (deepest tier)
 
 double CurrentLot = 0.01;
 double CurrentEquityMultiplier = 2500.0;
@@ -36,20 +40,32 @@ bool UseDynamicGrid = true;
 double GridDistanceStatic = 100.0;
 double GridMin = 50.0;
 double GridMax = 300.0;
-double TPMin = 5.0;
+double GridStepPct = 25.0;
+double TPMin = 10.0;
 double TPMax = 100.0;
+double TPMult1 = 0.60;
+double TPStep = 0.20;
+double TPMultMax = 1.40;
 int CurrentRiskScore = 50;
 bool IsTradingPaused = false;
 double lastGridEff = 0.0;
 double lastATR = 0.0;
+string exportRequestId = "0";
+string lastAction = "";
+ulong prevTickets[32];
+int prevCount = 0;
+string lastExportId = "0";
+int exportDays = 30;
+string exportPrice = "BID";
 
 int magicNumber = 88888;
 string serverURL = "http://100.75.220.84:8000";
 int lastMinute = -1;
-int rsiHandles[5];
-int atrHandle = INVALID_HANDLE;
-string tfNames[5] = {"M1", "M5", "M15", "M30", "H1"};
-ENUM_TIMEFRAMES tfPeriods[5] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30, PERIOD_H1};
+int rsiHandles[6];
+int atrHandles[6];
+int atrH1Handle = INVALID_HANDLE;
+string tfNames[6] = {"M1", "M5", "M15", "M30", "H1", "D1"};
+ENUM_TIMEFRAMES tfPeriods[6] = {PERIOD_M1, PERIOD_M5, PERIOD_M15, PERIOD_M30, PERIOD_H1, PERIOD_D1};
 
 int OnInit() {
    trade.SetExpertMagicNumber(magicNumber);
@@ -61,58 +77,103 @@ int OnInit() {
    EnableBasketClose = InpEnableBasketClose;
    UseDynamicGrid = InpUseDynamicGrid;
    GridDistanceStatic = InpGridDistance;
-   GridMin = InpGridMin; GridMax = InpGridMax;
+   GridMin = InpGridMin; GridMax = InpGridMax; GridStepPct = InpGridStepPct;
    TPMin = InpTPMin; TPMax = InpTPMax;
+   TPMult1 = InpTPMult1; TPStep = InpTPStep; TPMultMax = InpTPMultMax;
    EventSetTimer(5);
-   for(int i=0; i<5; i++) {
+   for(int i=0; i<6; i++) {
       rsiHandles[i] = iRSI(_Symbol, tfPeriods[i], 14, PRICE_CLOSE);
-      if(rsiHandles[i] == INVALID_HANDLE) { Print("Failed RSI handle ", tfNames[i]); return INIT_FAILED; }
+      atrHandles[i] = iATR(_Symbol, tfPeriods[i], 14);
+      if(rsiHandles[i] == INVALID_HANDLE || atrHandles[i] == INVALID_HANDLE) { Print("Failed handle ", tfNames[i]); return INIT_FAILED; }
    }
-   atrHandle = iATR(_Symbol, PERIOD_H1, InpATRPeriod);
-   if(atrHandle == INVALID_HANDLE) { Print("Failed ATR handle"); return INIT_FAILED; }
-   Print("AEGIS Captain EA Initialized - Version 0.4.0 (dynamic grid + tiered TP)");
+   atrH1Handle = atrHandles[4];
+   Print("AEGIS Captain EA Initialized - Version 0.9.1");
    return INIT_SUCCEEDED;
 }
 
 double ClampD(double v, double lo, double hi) { if(v < lo) return lo; if(v > hi) return hi; return v; }
-
-double GetATR() {
-   double buf[]; ArraySetAsSeries(buf, true);
-   if(CopyBuffer(atrHandle, 0, 0, 1, buf) > 0) return buf[0];
-   return 0.0;
-}
+double GetATR() { double buf[]; ArraySetAsSeries(buf, true); if(CopyBuffer(atrH1Handle, 0, 0, 1, buf) > 0) return buf[0]; return 0.0; }
+double GetRSI(int tfIndex) { double buf[]; ArraySetAsSeries(buf, true); if(CopyBuffer(rsiHandles[tfIndex], 0, 0, 1, buf) > 0) return buf[0]; return 50.0; }
+double GetRSIPrev(int tfIndex) { double buf[]; ArraySetAsSeries(buf, true); if(CopyBuffer(rsiHandles[tfIndex], 0, 1, 1, buf) > 0) return buf[0]; return 50.0; }
 
 double DynamicGrid() {
    double atr = GetATR();
    lastATR = atr;
    if(!UseDynamicGrid || atr <= 0.0) { lastGridEff = GridDistanceStatic; return GridDistanceStatic; }
    double mult = 0.60 + 0.80 * ((double)CurrentRiskScore / 100.0);
-   double g = ClampD(atr * mult, GridMin, GridMax);
-   lastGridEff = g;
-   return g;
+   lastGridEff = ClampD(atr * mult, GridMin, GridMax);
+   return lastGridEff;
 }
 
 double TierMult(int tier) {
-   if(tier <= 1) return 1.00;
-   if(tier == 2) return 0.75;
-   if(tier == 3) return 0.60;
-   return 0.50;
+   double m = TPMult1 + TPStep * (double)(tier - 1);
+   if(m > TPMultMax) m = TPMultMax;
+   return m;
 }
 
 double TierTP(int tier) {
    double atr = GetATR();
-   if(atr <= 0.0) atr = 50.0; // documented fallback when ATR unavailable
+   if(atr <= 0.0) atr = 50.0;
    double g = 1.40 - 0.80 * ((double)CurrentRiskScore / 100.0);
    return ClampD(atr * TierMult(tier) * g, TPMin, TPMax);
 }
 
-double GetRSI(int tfIndex) { double buf[]; ArraySetAsSeries(buf, true); if(CopyBuffer(rsiHandles[tfIndex], 0, 0, 1, buf) > 0) return buf[0]; return 50.0; }
-double GetRSIPrev(int tfIndex) { double buf[]; ArraySetAsSeries(buf, true); if(CopyBuffer(rsiHandles[tfIndex], 0, 1, 1, buf) > 0) return buf[0]; return 50.0; }
+double NextGap(int openCount, double g) {
+   if(openCount <= 0) return 0.0;
+   return g * (1.0 + (GridStepPct / 100.0) * (double)(openCount - 1));
+}
+
+int SendChunk(string body) {
+   char data[]; char res[]; string rh;
+   StringToCharArray(body, data, 0, StringLen(body), CP_UTF8);
+   string headers = "Content-Type: text/csv\r\n";
+   return WebRequest("POST", serverURL + "/api/v1/tools/export_chunk", headers, 15000, data, res, rh);
+}
+
+void DoExport() {
+   datetime cutoff = TimeCurrent() - exportDays * 86400;
+   double askOff = 0.0;
+   if(exportPrice == "ASK") {
+      askOff = (double)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * _Point;
+      if(askOff <= 0.0) askOff = SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   }
+   Print("EXPORT basis=", exportPrice, " askOff=", DoubleToString(askOff, _Digits));
+   string chunk = "time,timeframe,basis,open,high,low,close,tick_volume,rsi14,atr14\n";
+   int rows = 0; int totalRows = 0;
+   for(int t=0; t<6; t++) {
+      int bars = iBars(_Symbol, tfPeriods[t]);
+      if(bars <= 0) continue;
+      MqlRates rates[]; ArraySetAsSeries(rates, true);
+      double rsiBuf[]; double atrBuf[]; ArraySetAsSeries(rsiBuf, true); ArraySetAsSeries(atrBuf, true);
+      if(CopyRates(_Symbol, tfPeriods[t], 0, bars, rates) <= 0) continue;
+      CopyBuffer(rsiHandles[t], 0, 0, bars, rsiBuf);
+      CopyBuffer(atrHandles[t], 0, 0, bars, atrBuf);
+      for(int i = bars - 1; i >= 0; i--) {
+         if(rates[i].time < cutoff) continue;
+         chunk += TimeToString(rates[i].time, TIME_DATE|TIME_MINUTES) + "," + tfNames[t] + "," + exportPrice + "," +
+                  DoubleToString(rates[i].open + askOff, _Digits) + "," + DoubleToString(rates[i].high + askOff, _Digits) + "," +
+                  DoubleToString(rates[i].low + askOff, _Digits) + "," + DoubleToString(rates[i].close + askOff, _Digits) + "," +
+                  IntegerToString((long)rates[i].tick_volume) + "," +
+                  DoubleToString(rsiBuf[i], 2) + "," + DoubleToString(atrBuf[i], 2) + "\n";
+         rows++; totalRows++;
+         if(rows >= 300) { SendChunk(chunk); chunk = ""; rows = 0; }
+      }
+   }
+   if(chunk != "") SendChunk(chunk);
+   char d[]; char r2[]; string h2 = ""; string rh2;
+   WebRequest("GET", serverURL + "/api/v1/tools/export_done?id=" + lastExportId, h2, 10000, d, r2, rh2);
+   Print("EXPORT COMPLETE: ", totalRows, " rows over ", exportDays, " days, 6 timeframes.");
+}
 
 void OnTimer() {
    char postData[]; char result[]; string headers;
    int resGet = WebRequest("GET", serverURL + "/api/v1/ea/config", headers, 2000, postData, result, headers);
    if(resGet == 200) ParseConfig(CharArrayToString(result));
+
+   if(exportRequestId != "0" && exportRequestId != lastExportId) {
+      lastExportId = exportRequestId;
+      DoExport();
+   }
 
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
@@ -130,34 +191,65 @@ void OnTimer() {
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double h1Rsi = GetRSI(4);
 
+   int openCount = 0; double lowestPrice = DBL_MAX; double curLots = 0;
+   ulong curTickets[32]; int curCount = 0; double rawEntries[16]; double rawTps[16];
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == magicNumber) {
+         double open = PositionGetDouble(POSITION_PRICE_OPEN);
+         if(open < lowestPrice) lowestPrice = open;
+         curLots += PositionGetDouble(POSITION_VOLUME);
+         if(openCount < 16) { rawEntries[openCount] = open; rawTps[openCount] = PositionGetDouble(POSITION_TP); }
+         openCount++;
+         if(curCount < 32) { curTickets[curCount] = (ulong)PositionGetInteger(POSITION_TICKET); curCount++; }
+      }
+   }
+   // detect externally closed positions (TP hits) for Last Action line
+   for(int pi = 0; pi < prevCount; pi++) {
+      bool found = false;
+      for(int ci = 0; ci < curCount; ci++) if(curTickets[ci] == prevTickets[pi]) { found = true; break; }
+      if(!found) {
+         HistorySelect(TimeCurrent() - 604800, TimeCurrent() + 60);
+         for(int d = HistoryDealsTotal() - 1; d >= 0; d--) {
+            ulong dt = HistoryDealGetTicket(d);
+            if(dt > 0 && (ulong)HistoryDealGetInteger(dt, DEAL_POSITION_ID) == prevTickets[pi] &&
+               (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dt, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
+               double pl = HistoryDealGetDouble(dt, DEAL_PROFIT) + HistoryDealGetDouble(dt, DEAL_SWAP) + HistoryDealGetDouble(dt, DEAL_COMMISSION);
+               ENUM_DEAL_REASON rs = (ENUM_DEAL_REASON)HistoryDealGetInteger(dt, DEAL_REASON);
+               string rstr = (rs == DEAL_REASON_TP) ? "TP" : ((rs == DEAL_REASON_CLIENT) ? "EA/manual" : "other");
+               lastAction = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + "_CLOSED_#" + IntegerToString((long)prevTickets[pi]) + "_" + rstr + "_P/L_" + DoubleToString(pl, 2);
+               break;
+            }
+         }
+      }
+   }
+   prevCount = curCount;
+   for(int ci2 = 0; ci2 < curCount; ci2++) prevTickets[ci2] = curTickets[ci2];
+   // tier-ordered entries (desc) and pos payload
+   for(int a2=1; a2<openCount; a2++) { double v=rawEntries[a2]; double vt=rawTps[a2]; int b2=a2-1; while(b2>=0 && rawEntries[b2]<v) { rawEntries[b2+1]=rawEntries[b2]; rawTps[b2+1]=rawTps[b2]; b2--; } rawEntries[b2+1]=v; rawTps[b2+1]=vt; }
+   string posPayload = "";
+   for(int t2=0; t2<openCount; t2++) { if(t2>0) posPayload += ","; posPayload += DoubleToString(rawEntries[t2],2) + "|" + DoubleToString(rawTps[t2],2); }
+
+   string hookStr = "";
+   for(int hi=0; hi<4; hi++) { double hrc=GetRSI(hi); double hrp=GetRSIPrev(hi); if(hrc > hrp && hrc < 40.0) { hookStr = tfNames[hi] + "_" + DoubleToString(hrc,1); break; } }
    string restriction_reason = "None";
    if(IsTradingPaused) restriction_reason = "User Paused via Dashboard";
    else if(!trade_allowed) restriction_reason = "Algo Trading Disabled in MT5";
    else if(margin_level < 1000) restriction_reason = "Margin Level < 1000%";
    else if(UseH1RSIFilter && h1Rsi < MinH1RSI) restriction_reason = "H1 RSI < " + DoubleToString(MinH1RSI,1);
    else if(currentPrice > pause_threshold) restriction_reason = "Price in Top 15% of 4-Week Range";
-   else {
-      int openCount = 0; double lowestPrice = DBL_MAX;
-      for(int i = PositionsTotal() - 1; i >= 0; i--) {
-         if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == magicNumber) {
-            double open = PositionGetDouble(POSITION_PRICE_OPEN);
-            if(open < lowestPrice) lowestPrice = open;
-            openCount++;
-         }
+   else if(openCount > 0) {
+      double need = NextGap(openCount, gridEff);
+      double dist = lowestPrice - currentPrice;
+      if(dist < need) restriction_reason = "Waiting for Grid Distance (Current: " + DoubleToString(dist,1) + " of " + DoubleToString(need,1) + " pts to next tier)";
+      else {
+         string tf = "";
+         for(int i=0; i<4; i++) { double rc=GetRSI(i); double rp=GetRSIPrev(i); if(rc > rp && rc < 40.0) { tf=tfNames[i]; break; } }
+         if(tf == "") restriction_reason = "Waiting for RSI Hook (<40 & turning up)";
       }
-      if(openCount > 0) {
-         double distance = MathAbs(currentPrice - lowestPrice);
-         if(distance < gridEff) restriction_reason = "Waiting for Grid Distance (Current: " + DoubleToString(distance,1) + " of " + DoubleToString(gridEff,1) + " pts)";
-         else {
-            string tf = "";
-            for(int i=0; i<4; i++) { double rc=GetRSI(i); double rp=GetRSIPrev(i); if(rc > rp && rc < 40.0) { tf=tfNames[i]; break; } }
-            if(tf == "") restriction_reason = "Waiting for RSI Hook (<40 & turning up)";
-         }
-      } else {
-         string tf2 = "";
-         for(int i=0; i<4; i++) { double rc=GetRSI(i); double rp=GetRSIPrev(i); if(rc > rp && rc < 40.0) { tf2=tfNames[i]; break; } }
-         if(tf2 == "") restriction_reason = "Waiting for Initial RSI Hook (<40 & turning up)";
-      }
+   } else {
+      string tf2 = "";
+      for(int i=0; i<4; i++) { double rc=GetRSI(i); double rp=GetRSIPrev(i); if(rc > rp && rc < 40.0) { tf2=tfNames[i]; break; } }
+      if(tf2 == "") restriction_reason = "Waiting for Initial RSI Hook (<40 & turning up)";
    }
 
    string statusUrl = serverURL + "/api/v1/ea/status?equity=" + DoubleToString(equity, 2) +
@@ -170,7 +262,18 @@ void OnTimer() {
                       "&trade_allowed=" + (trade_allowed ? "1" : "0") +
                       "&grid_eff=" + DoubleToString(gridEff, 1) +
                       "&atr=" + DoubleToString(lastATR, 1) +
-                      "&restriction_reason=" + restriction_reason;
+                      "&restriction_reason=" + restriction_reason +
+                      "&g_h1=" + DoubleToString(h1Rsi,1) +
+                      "&g_h1min=" + DoubleToString(MinH1RSI,1) +
+                      "&g_athpct=" + DoubleToString((ath>atl)?(currentPrice-atl)/(ath-atl)*100.0:0.0,1) +
+                      "&g_lots=" + DoubleToString(curLots,2) +
+                      "&g_lotmax=" + DoubleToString((equity / CurrentEquityMultiplier) * 0.01,2) +
+                      "&g_dist=" + DoubleToString(lowestPrice - currentPrice,1) +
+                      "&g_need=" + DoubleToString(NextGap(openCount, gridEff),1) +
+                      "&g_hook=" + hookStr +
+                      "&g_cur=" + DoubleToString(currentPrice,2) +
+                      "&pos=" + posPayload +
+                      "&last_action=" + lastAction;
    WebRequest("GET", statusUrl, headers, 2000, postData, result, headers);
 
    int currentMinute = (int)(TimeCurrent() / 60);
@@ -197,9 +300,7 @@ void ExecuteBasketLogic() {
 
    double gridEff = DynamicGrid();
 
-   int openCount = 0;
-   double current_lots = 0;
-   double entries[16];
+   int openCount = 0; double current_lots = 0; double entries[16];
    for(int i = PositionsTotal() - 1; i >= 0; i--) {
       if(PositionGetSymbol(i) == _Symbol && PositionGetInteger(POSITION_MAGIC) == magicNumber) {
          current_lots += PositionGetDouble(POSITION_VOLUME);
@@ -210,17 +311,15 @@ void ExecuteBasketLogic() {
    double max_lots = (equity / CurrentEquityMultiplier) * 0.01;
    if(current_lots + CurrentLot > max_lots + 0.001) return;
 
-   // Tier ranking: highest entry price = tier 1 (insertion sort desc)
    for(int a=1; a<openCount; a++) { double v=entries[a]; int b=a-1; while(b>=0 && entries[b]<v) { entries[b+1]=entries[b]; b--; } entries[b+1]=v; }
+   double lowestPrice = (openCount > 0) ? entries[openCount-1] : DBL_MAX;
 
-   // Basket close (optional): avg floating pts >= avg of per-position tier TPs
    if(EnableBasketClose && openCount > 0) {
       double totalFloating = 0; double tpSum = 0;
       for(int t=0; t<openCount; t++) { totalFloating += (currentPrice - entries[t]); tpSum += TierTP(t+1); }
-      double avgProfit = totalFloating / openCount;
-      double avgTarget = tpSum / openCount;
-      if(avgProfit >= avgTarget) {
-         Print("BASKET TP: avg ", DoubleToString(avgProfit,1), " >= ", DoubleToString(avgTarget,1), ". Closing all.");
+      if(totalFloating / openCount >= tpSum / openCount) {
+         Print("BASKET TP reached. Closing all.");
+         lastAction = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + "_BASKET_CLOSE_avg_" + DoubleToString(totalFloating / openCount,1) + "pts";
          for(int i = PositionsTotal() - 1; i >= 0; i--) {
             if(PositionGetSymbol(i)==_Symbol && PositionGetInteger(POSITION_MAGIC)==magicNumber) {
                ulong t=PositionGetTicket(i); if(t>0) trade.PositionClose(t);
@@ -230,7 +329,6 @@ void ExecuteBasketLogic() {
       }
    }
 
-   // Entry (MARKET BUY ONLY)
    if(openCount < 10) {
       string triggerTF = ""; double triggerRSI = 0;
       for(int i=0; i<4; i++) {
@@ -239,17 +337,19 @@ void ExecuteBasketLogic() {
       }
       if(triggerTF != "") {
          bool canEnter = true;
-         for(int i=0; i<openCount; i++) {
-            if(MathAbs(currentPrice - entries[i]) < gridEff) { canEnter = false; break; }
+         if(openCount > 0) {
+            double need = NextGap(openCount, gridEff);
+            if((lowestPrice - currentPrice) < need) canEnter = false;
          }
          if(canEnter) {
             int tier = openCount + 1;
             double targetTP = TierTP(tier);
             double tpPrice = NormalizeDouble(currentPrice + targetTP, _Digits);
             string comment = "AEGIS_T" + IntegerToString(tier) + "_MTF[" + triggerTF + "]_RSI[" + DoubleToString(triggerRSI,1) + "]";
-            Print("TP MATH: tier=", tier, " atr=", DoubleToString(lastATR,1), " risk=", CurrentRiskScore, " target=", DoubleToString(targetTP,1), " tpPrice=", tpPrice, " gridEff=", DoubleToString(gridEff,1));
+            Print("TP MATH: tier=", tier, " atr=", DoubleToString(lastATR,1), " risk=", CurrentRiskScore, " target=", DoubleToString(targetTP,1), " tpPrice=", tpPrice, " gridEff=", DoubleToString(gridEff,1), " nextGap=", DoubleToString(NextGap(openCount, gridEff),1));
             if(trade.Buy(CurrentLot, _Symbol, 0, 0, tpPrice, comment)) {
                Print("MARKET BUY tier ", tier, " at ", currentPrice, " | TP ", tpPrice);
+               lastAction = TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + "_BUY_" + DoubleToString(CurrentLot,2) + "_@" + DoubleToString(currentPrice,2) + "_T" + IntegerToString(tier) + "_TP_" + DoubleToString(tpPrice,2);
             }
          }
       }
@@ -268,6 +368,17 @@ void ParseConfig(string data) {
          if(kv[0] == "ENABLE_BASKET") EnableBasketClose = (kv[1] == "true");
          if(kv[0] == "IS_PAUSED") IsTradingPaused = (kv[1] == "true");
          if(kv[0] == "ATH_THRESHOLD") CurrentATHThreshold = StringToDouble(kv[1]);
+         if(kv[0] == "EXPORT_REQUEST") exportRequestId = kv[1];
+         if(kv[0] == "EXPORT_DAYS") exportDays = (int)StringToInteger(kv[1]);
+         if(kv[0] == "EXPORT_PRICE") exportPrice = kv[1];
+         if(kv[0] == "GRID_MIN") GridMin = StringToDouble(kv[1]);
+         if(kv[0] == "GRID_MAX") GridMax = StringToDouble(kv[1]);
+         if(kv[0] == "GRID_STEP_PCT") GridStepPct = StringToDouble(kv[1]);
+         if(kv[0] == "TP_MIN") TPMin = StringToDouble(kv[1]);
+         if(kv[0] == "TP_MAX") TPMax = StringToDouble(kv[1]);
+         if(kv[0] == "TP_T1_MULT") TPMult1 = StringToDouble(kv[1]);
+         if(kv[0] == "TP_TIER_STEP") TPStep = StringToDouble(kv[1]);
+         if(kv[0] == "TP_TIER_MAX") TPMultMax = StringToDouble(kv[1]);
       }
    }
 }

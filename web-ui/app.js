@@ -1,7 +1,7 @@
 new Vue({
     el: '#app',
     data: {
-        version: '0.3.0',
+        version: '0.9.1',
         currentTab: 'dashboard',
         isMobileMenuOpen: false,
         isMobileMenuOpen: false,
@@ -9,6 +9,7 @@ new Vue({
         eaMetrics: { ath: 0, atl: 0, threshold: 0, trade_allowed: true, restriction_reason: 'None' },
         isTradingPaused: false,
         exportPeriod: 30,
+        exportPrice: 'BID',
         isExporting: false,
         exportReady: false,
         scanInterval: 4,
@@ -17,9 +18,57 @@ new Vue({
         settingsDirty: false,
         scanResult: null,
         newsConfig: { active_keywords: [], default_keywords: [], active_rss_feeds: [], default_rss_feeds: [] },
-        eaConfig: { base_lot_size: 0.01, grid_distance: 100.0, equity_multiplier: 2500, enable_basket_close: false, ath_threshold: 0.15, scan_interval_hours: 4 }
+        eaConfig: { base_lot_size: 0.01, grid_distance: 100.0, equity_multiplier: 2500, enable_basket_close: false, ath_threshold: 0.15, scan_interval_hours: 4, grid_min: 50, grid_max: 300, grid_step_pct: 25, tp_min: 10, tp_max: 100, tp_t1_mult: 0.6, tp_tier_step: 0.2, tp_tier_max: 1.4 }
     },
     computed: {
+        positionCount() {
+            const lot = this.eaConfig.base_lot_size || 0.01;
+            const mult = this.eaConfig.equity_multiplier || 2500;
+            const equity = this.accountStatus.equity || 0;
+            const cnt = Math.floor(((equity / mult) * 0.01) / lot + 1e-9);
+            return Math.min(Math.max(cnt, 1), 10);
+        },
+        gates() {
+            const m = this.eaMetrics, a = this.accountStatus, g = [];
+            g.push({ label: 'Pause', state: this.isTradingPaused ? 'bad' : 'ok', text: this.isTradingPaused ? 'Paused' : 'Auto' });
+            g.push({ label: 'Algo', state: m.trade_allowed ? 'ok' : 'bad', text: m.trade_allowed ? 'ON' : 'OFF' });
+            g.push({ label: 'Margin', state: (a.margin_level || 0) >= 1000 ? 'ok' : 'bad', text: (a.margin_level || 0) >= 1000 ? 'OK' : (this.fmt(a.margin_level, 0) + '%') });
+            const h1ok = !m.g_h1 || m.g_h1 >= (m.g_h1min || 30);
+            g.push({ label: 'H1 Trend', state: h1ok ? 'ok' : 'bad', text: h1ok ? ('RSI ' + this.fmt(m.g_h1, 0)) : ('RSI ' + this.fmt(m.g_h1, 0) + ' < ' + this.fmt(m.g_h1min, 0)) });
+            g.push({ label: 'ATH Zone', state: (m.g_athpct || 0) <= 85 ? 'ok' : 'bad', text: this.fmt(m.g_athpct, 0) + '%' });
+            g.push({ label: 'Exposure', state: (m.g_lots || 0) < (m.g_lotmax || 0) ? 'ok' : 'bad', text: this.fmt(m.g_lots, 2) + '/' + this.fmt(m.g_lotmax, 2) });
+            if (!m.pos) g.push({ label: 'Grid', state: 'ok', text: 'first entry' });
+            else g.push({ label: 'Grid', state: (m.g_dist || 0) >= (m.g_need || 0) ? 'ok' : 'wait', text: this.fmt(m.g_dist, 0) + ' of ' + this.fmt(m.g_need, 0) + ' pts' });
+            g.push({ label: 'Hook', state: (m.restriction_reason === 'None') ? 'ok' : 'wait', text: (m.restriction_reason === 'None') ? 'triggered' : (m.g_hook || 'waiting') });
+            return g;
+        },
+        positions() {
+            const m = this.eaMetrics;
+            if (!m.pos) return [];
+            return m.pos.split(',').filter(x => x).map((pair, i) => {
+                const parts = pair.split('|');
+                const entry = parseFloat(parts[0]) || 0, tp = parseFloat(parts[1]) || 0, cur = m.g_cur || 0;
+                return { entry: entry, tp: tp, tier: i + 1, toTp: tp - cur, floating: cur - entry };
+            });
+        },
+        gridTable() {
+            const c = this.eaConfig, atr = this.eaMetrics.atr || 0, R = (this.liveConfig && this.liveConfig.risk_score) || 50;
+            const nat = atr * (0.60 + 0.80 * R / 100);
+            const G = Math.min(Math.max(nat, c.grid_min || 0), c.grid_max || 9999);
+            const rows = [];
+            for (let k = 1; k <= Math.max(1, this.positionCount - 1); k++) rows.push({ pair: 'P' + k + '-P' + (k + 1), gap: G * (1 + (c.grid_step_pct || 0) / 100 * (k - 1)) });
+            return { G: G, rows: rows };
+        },
+        tpTable() {
+            const c = this.eaConfig, atr = this.eaMetrics.atr || 0, R = (this.liveConfig && this.liveConfig.risk_score) || 50;
+            const g = 1.40 - 0.80 * R / 100;
+            const rows = [];
+            for (let t = 1; t <= this.positionCount; t++) {
+                const mult = Math.min((c.tp_t1_mult || 0.6) + (c.tp_tier_step || 0.2) * (t - 1), c.tp_tier_max || 1.4);
+                rows.push({ tier: 'T' + t, tp: Math.min(Math.max(atr * mult * g, c.tp_min || 0), c.tp_max || 9999) });
+            }
+            return rows;
+        },
         checkedKeywords() { 
             const defaults = this.newsConfig.default_keywords || [];
             const active = this.newsConfig.active_keywords || [];
@@ -42,6 +91,25 @@ new Vue({
         }
     },
     methods: {
+        fmt(v, d) {
+            if (v === null || v === undefined || isNaN(v)) v = 0;
+            return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+        },
+        async saveAsDefault() {
+            try {
+                await axios.post('/api/v1/config/save_default');
+                alert('Current configuration saved as new default for future restarts.');
+            } catch (e) { alert('Failed to save default.'); }
+        },
+        async applyAndSaveDefault() {
+            try {
+                await axios.post('/api/v1/config/update', this.eaConfig);
+                await axios.post('/api/v1/config/save_default');
+                this.settingsDirty = false;
+                alert('Applied to EA and saved as new default.');
+            } catch (e) { alert('Failed to apply/save default.'); }
+        },
+
         getSources() {
             if (!this.scanResult) return [];
             const src = this.scanResult.sources || this.scanResult.verified_sources || this.scanResult.articles || [];
@@ -61,7 +129,12 @@ new Vue({
             try {
                 const res = await axios.get('/api/v1/status');
                 this.accountStatus = res.data;
-                this.eaMetrics = { ath: res.data.ath || 0, atl: res.data.atl || 0, threshold: res.data.threshold || 0, trade_allowed: res.data.trade_allowed !== false, restriction_reason: res.data.restriction_reason || 'None', grid_eff: res.data.grid_eff || 0, atr: res.data.atr || 0 };
+                this.eaMetrics = { ath: res.data.ath || 0, atl: res.data.atl || 0, threshold: res.data.threshold || 0, trade_allowed: res.data.trade_allowed !== false, restriction_reason: res.data.restriction_reason || 'None', grid_eff: res.data.grid_eff || 0, atr: res.data.atr || 0,
+                          g_h1: res.data.g_h1 || 0, g_h1min: res.data.g_h1min || 30, g_athpct: res.data.g_athpct || 0,
+                          g_lots: res.data.g_lots || 0, g_lotmax: res.data.g_lotmax || 0,
+                          g_dist: res.data.g_dist || 0, g_need: res.data.g_need || 0,
+                          g_hook: res.data.g_hook || "", g_cur: res.data.g_cur || 0,
+                          pos: res.data.pos || "", last_action: res.data.last_action || "" };
                 this.isTradingPaused = res.data.is_paused || false;
                 if(res.data.last_scan_result) this.scanResult = res.data.last_scan_result;
                 if (res.data.ea_config) {
@@ -74,6 +147,9 @@ new Vue({
                         enable_basket_close: c.ENABLE_BASKET === 'true',
                         ath_threshold: Number(c.ATH_THRESHOLD),
                         scan_interval_hours: Number(c.SCAN_INTERVAL_HOURS),
+                        grid_min: Number(c.GRID_MIN), grid_max: Number(c.GRID_MAX), grid_step_pct: Number(c.GRID_STEP_PCT),
+                        tp_min: Number(c.TP_MIN), tp_max: Number(c.TP_MAX),
+                        tp_t1_mult: Number(c.TP_T1_MULT), tp_tier_step: Number(c.TP_TIER_STEP), tp_tier_max: Number(c.TP_TIER_MAX),
                         risk_score: Number(c.RISK_SCORE)
                     };
                     if (this.currentTab !== 'settings' || !this.settingsDirty) {
@@ -105,7 +181,7 @@ new Vue({
         async triggerExport() {
             this.isExporting = true; this.exportReady = false;
             try {
-                await axios.post('/api/v1/tools/export?days=' + this.exportPeriod);
+                await axios.post('/api/v1/tools/export?days=' + this.exportPeriod + '&price=' + this.exportPrice);
                 this.pollExportStatus();
             } catch (e) { this.isExporting = false; }
         },

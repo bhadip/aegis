@@ -1,0 +1,21 @@
+{
+  "LOT": 0.01,
+  "GRID_DISTANCE": 100.0,
+  "EQUITY_MULTIPLIER": 2000.0,
+  "RISK_SCORE": 50,
+  "ENABLE_BASKET": "false",
+  "IS_PAUSED": "false",
+  "ATH_THRESHOLD": "0.15",
+  "SCAN_INTERVAL_HOURS": "4",
+  "EXPORT_REQUEST": "0",
+  "EXPORT_DONE": "0",
+  "EXPORT_DAYS": "30",
+  "GRID_MIN": "50.0",
+  "GRID_MAX": "300.0",
+  "GRID_STEP_PCT": "25.0",
+  "TP_MIN": "10.0",
+  "TP_MAX": "100.0",
+  "TP_T1_MULT": "0.6",
+  "TP_TIER_STEP": "0.2",
+  "TP_TIER_MAX": "1.4"
+}

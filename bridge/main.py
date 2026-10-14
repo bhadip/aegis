@@ -1,4 +1,6 @@
 import os
+import json
+import time
 import httpx
 import requests
 import asyncio
@@ -8,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="ExaGuard AEGIS Bridge API v0.4.0")
+app = FastAPI(title="ExaGuard AEGIS Bridge API v0.7.1")
 
 account_status = {"equity": 0.0, "balance": 0.0, "margin_level": 0.0, "active_positions": 0, "status": "Disconnected"}
 ea_metrics = {"ath": 0.0, "atl": 0.0, "threshold": 0.0, "trade_allowed": True, "restriction_reason": "None"}
@@ -19,8 +21,18 @@ last_scan_time = None
 ea_config = {
     "LOT": 0.01, "GRID_DISTANCE": 100.0, "EQUITY_MULTIPLIER": 2500,
     "RISK_SCORE": 50, "ENABLE_BASKET": "false",
-    "IS_PAUSED": "false", "ATH_THRESHOLD": "0.15", "SCAN_INTERVAL_HOURS": 4
+    "IS_PAUSED": "false", "ATH_THRESHOLD": "0.15", "SCAN_INTERVAL_HOURS": 4, "EXPORT_REQUEST": "0", "EXPORT_DONE": "0", "EXPORT_DAYS": "30", "GRID_MIN": 50.0, "GRID_MAX": 300.0, "GRID_STEP_PCT": 25.0, "TP_MIN": 10.0, "TP_MAX": 100.0, "TP_T1_MULT": 0.6, "TP_TIER_STEP": 0.2, "TP_TIER_MAX": 1.4
 }
+
+
+DEFAULTS_PATH = "/app/mt5_ea/Files/aegis_config_default.json"
+try:
+    if os.path.exists(DEFAULTS_PATH):
+        with open(DEFAULTS_PATH) as f:
+            ea_config.update(json.load(f))
+        print("Loaded persisted defaults from", DEFAULTS_PATH)
+except Exception as e:
+    print("Defaults load error:", e)
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -48,6 +60,7 @@ async def run_scan_logic():
             risk_score = "N/A"
             bias = "N/A"
             sources_list = []
+            sent_line = ""
 
             if isinstance(data, list) and len(data) > 0:
                 sources_list = data
@@ -59,6 +72,7 @@ async def run_scan_logic():
                     if avg_sentiment > 0.1: bias = "Bullish"
                     elif avg_sentiment < -0.1: bias = "Bearish"
                     else: bias = "Neutral"
+                    sent_line = f"\nAvg Sentiment: {avg_sentiment*100:.0f}%"
             elif isinstance(data, dict):
                 risk_score = data.get("risk_score", data.get("score", "N/A"))
                 bias = data.get("bias", data.get("sentiment", "N/A"))
@@ -77,7 +91,7 @@ async def run_scan_logic():
             heads = [str(a.get('headline', a.get('title', 'N/A'))) for a in sources_list[:10]]
             def build_msg(hl):
                 body = "\n".join([f"- {h}" for h in hl])
-                return f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*\n\n*Headlines:*\n{body}"
+                return f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
             msg = build_msg(heads)
             while len(msg) > 4000 and heads:
                 heads.pop()
@@ -95,15 +109,22 @@ async def startup_event():
     asyncio.create_task(scan_scheduler())
 
 async def scan_scheduler():
+    elapsed = 0
     while True:
-        hours = int(ea_config.get("SCAN_INTERVAL_HOURS", 4))
-        await asyncio.sleep(hours * 3600)
-        await run_scan_logic()
+        await asyncio.sleep(60)
+        elapsed += 60
+        hours = float(ea_config.get("SCAN_INTERVAL_HOURS", 4))
+        if elapsed >= hours * 3600:
+            elapsed = 0
+            await run_scan_logic()
 
 class ConfigUpdate(BaseModel):
     base_lot_size: float; grid_distance: float; equity_multiplier: float
     enable_basket_close: bool = False
     ath_threshold: float = 0.15; scan_interval_hours: int = 4
+    grid_min: float = 50.0; grid_max: float = 300.0; grid_step_pct: float = 25.0
+    tp_min: float = 10.0; tp_max: float = 100.0
+    tp_t1_mult: float = 0.6; tp_tier_step: float = 0.2; tp_tier_max: float = 1.4
 
 @app.get("/api/v1/status")
 def get_status():
@@ -116,14 +137,20 @@ def get_status():
 @app.get("/api/v1/ea/status")
 def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: float = 0.0, active_positions: int = 0,
                      ath: float = 0.0, atl: float = 0.0, threshold: float = 0.0, trade_allowed: int = 1,
-                     restriction_reason: str = "None", grid_eff: float = 0.0, atr: float = 0.0):
+                     restriction_reason: str = "None", grid_eff: float = 0.0, atr: float = 0.0,
+                     g_h1: float = 0.0, g_h1min: float = 0.0, g_athpct: float = 0.0,
+                     g_lots: float = 0.0, g_lotmax: float = 0.0, g_dist: float = 0.0, g_need: float = 0.0,
+                     g_hook: str = "", g_cur: float = 0.0, pos: str = "", last_action: str = ""):
     global account_status, ea_metrics
     new_status = "Disconnected"
     if margin_level > 2000: new_status = "Very Safe"
     elif margin_level > 1000: new_status = "Safe"
     elif margin_level > 0: new_status = "Warning"
     account_status = {"equity": equity, "balance": balance, "margin_level": margin_level, "active_positions": active_positions, "status": new_status}
-    ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason, "grid_eff": grid_eff, "atr": atr}
+    ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason, "grid_eff": grid_eff, "atr": atr,
+                  "g_h1": g_h1, "g_h1min": g_h1min, "g_athpct": g_athpct, "g_lots": g_lots,
+                  "g_lotmax": g_lotmax, "g_dist": g_dist, "g_need": g_need, "g_hook": g_hook,
+                  "g_cur": g_cur, "pos": pos, "last_action": last_action}
     return {"status": "received"}
 
 @app.get("/api/v1/control/pause")
@@ -148,6 +175,11 @@ def update_config(config: ConfigUpdate):
     ea_config["EQUITY_MULTIPLIER"] = config.equity_multiplier
     ea_config["ENABLE_BASKET"] = str(config.enable_basket_close).lower()
     ea_config["ATH_THRESHOLD"] = str(config.ath_threshold); ea_config["SCAN_INTERVAL_HOURS"] = str(config.scan_interval_hours)
+    ea_config["GRID_MIN"] = str(config.grid_min); ea_config["GRID_MAX"] = str(config.grid_max)
+    ea_config["GRID_STEP_PCT"] = str(config.grid_step_pct)
+    ea_config["TP_MIN"] = str(config.tp_min); ea_config["TP_MAX"] = str(config.tp_max)
+    ea_config["TP_T1_MULT"] = str(config.tp_t1_mult); ea_config["TP_TIER_STEP"] = str(config.tp_tier_step)
+    ea_config["TP_TIER_MAX"] = str(config.tp_tier_max)
     return {"status": "success"}
 
 @app.api_route("/api/v1/news/scan", methods=["GET", "POST"])
@@ -168,16 +200,43 @@ async def get_news_config():
     }
 
 @app.api_route("/api/v1/tools/export", methods=["GET", "POST"])
-def trigger_export(days: int = 30):
+def trigger_export(days: int = 30, price: str = "BID"):
     file_path = "/app/mt5_ea/Files/data_export.csv"
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, 'w') as f:
-        f.write("Timestamp,Symbol,Bid,Ask,RSI_M5,RSI_H1\n2026-10-12,ND,31000.00,31001.00,35.5,55.2\n")
-    return {"status": "Export created", "days": days}
+        f.write("")
+    ea_config["EXPORT_DAYS"] = str(days)
+    ea_config["EXPORT_PRICE"] = price.upper() if price.upper() in ("BID", "ASK") else "BID"
+    ea_config["EXPORT_DONE"] = "0"
+    ea_config["EXPORT_REQUEST"] = str(int(time.time()))
+    return {"status": "export_requested", "days": days, "id": ea_config["EXPORT_REQUEST"]}
+
+@app.post("/api/v1/tools/export_chunk")
+async def export_chunk(request: Request):
+    body = await request.body()
+    with open("/app/mt5_ea/Files/data_export.csv", "ab") as f:
+        f.write(body)
+    return {"status": "ok"}
+
+@app.api_route("/api/v1/tools/export_done", methods=["GET", "POST"])
+def export_done(id: str = "0"):
+    if id == ea_config.get("EXPORT_REQUEST", "0"):
+        ea_config["EXPORT_DONE"] = id
+    return {"status": "ok"}
 
 @app.get("/api/v1/tools/export_status")
 def check_export_status():
-    return {"ready": os.path.exists("/app/mt5_ea/Files/data_export.csv")}
+    req = ea_config.get("EXPORT_REQUEST", "0")
+    done = ea_config.get("EXPORT_DONE", "0")
+    ready = req != "0" and req == done and os.path.exists("/app/mt5_ea/Files/data_export.csv")
+    state = "ready" if ready else ("idle" if req == "0" else ("streaming" if done == "0" else "done_no_file"))
+    return {"ready": ready, "state": state, "request": req, "done": done}
+
+@app.post("/api/v1/config/save_default")
+def save_default():
+    with open(DEFAULTS_PATH, "w") as f:
+        json.dump(ea_config, f, indent=2)
+    return {"status": "saved", "path": DEFAULTS_PATH}
 
 @app.get("/api/v1/tools/download_data")
 def download_data():

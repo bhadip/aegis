@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0
+- Compile fix: SendChunk header string escape corrected (literal backslash-r-n), resolving "closing quote expected" errors at lines 123-125.
+- Formula coefficients now configurable from Dashboard Settings (Formula Tuning section) and synced to the EA every 5 s: GRID_MIN, GRID_MAX, GRID_STEP_PCT, TP_MIN, TP_MAX, TP_T1_MULT, TP_TIER_STEP, TP_TIER_MAX.
+- Defaults: TP range clamped to 10-100 price points (TP_MIN=10, TP_MAX=100).
+- Preset example for gradual grid P1-P2 >= 99 and P4-P5 >= 250: set Grid Min = 99 and Grid Step % = 51 (99 x (1 + 3 x 0.51) = 250.5).
+
+## 0.5.0
+- Tiered TP INVERTED per user logic: TierMult = min(0.60 + 0.20 x (tier-1), 1.40); tier 1 (highest/worst entry) gets the smallest TP to clear floating fast; deepest tier gets the largest TP to ride the rebound.
+- Gradual Grid Distance: required gap for the next position = GridBase x (1 + GridStepPct/100 x (openCount-1)), default step 25%, so P1-P2 < P2-P3 < P3-P4 ...
+- Real history export: EA streams OHLCV + RSI14 + ATR14 for M1/M5/M15/M30/H1/D1 over the requested days in chunks to the Bridge; Download CSV now contains the full dataset (tens of thousands of rows for 1 month), not a stub.
+- Settings: "Save as New Default" persists current config to mt5_ea/Files/aegis_config_default.json; Bridge reloads it on every start, so saved config survives restarts and rebuilds.
+- Scan card now shows a Headlines list plus the full verified-sources detail; headline binding no longer depends on a helper method.
+
 ## 0.4.0
 - Dynamic Grid Distance: Grid = clamp(ATR_H1(14) x (0.60 + 0.80 x RiskScore/100), GridMin 50, GridMax 300) price points. Static value remains as fallback.
 - Tiered volatility TP per position: TP(tier) = clamp(ATR_H1(14) x TierMult x (1.40 - 0.80 x RiskScore/100), TPMin 5, TPMax 100); TierMult = 1.00 / 0.75 / 0.60 / 0.50 for tiers 1/2/3/4+. Higher risk score lowers TP.
