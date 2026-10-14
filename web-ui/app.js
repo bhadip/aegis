@@ -13,9 +13,11 @@ new Vue({
         exportReady: false,
         scanInterval: 4,
         isScanning: false,
+        liveConfig: {},
+        settingsDirty: false,
         scanResult: null,
         newsConfig: { active_keywords: [], default_keywords: [], active_rss_feeds: [], default_rss_feeds: [] },
-        eaConfig: { base_lot_size: 0.01, grid_distance: 100.0, equity_multiplier: 2500, tp_low_risk: 20, tp_med_risk: 15, tp_high_risk: 10, enable_basket_close: false, ath_threshold: 0.15, scan_interval_hours: 4 }
+        eaConfig: { base_lot_size: 0.01, grid_distance: 100.0, equity_multiplier: 2500, enable_basket_close: false, ath_threshold: 0.15, scan_interval_hours: 4 }
     },
     computed: {
         checkedKeywords() { 
@@ -40,6 +42,11 @@ new Vue({
         }
     },
     methods: {
+        getSources() {
+            if (!this.scanResult) return [];
+            const src = this.scanResult.sources || this.scanResult.verified_sources || this.scanResult.articles || [];
+            return Array.isArray(src) ? src.slice(0, 3) : [];
+        },
         getHeadline(source) {
             if (typeof source === 'string') return source;
             if (source && source.headline) return source.headline;
@@ -54,9 +61,25 @@ new Vue({
             try {
                 const res = await axios.get('/api/v1/status');
                 this.accountStatus = res.data;
-                this.eaMetrics = { ath: res.data.ath || 0, atl: res.data.atl || 0, threshold: res.data.threshold || 0, trade_allowed: res.data.trade_allowed !== false, restriction_reason: res.data.restriction_reason || 'None' };
+                this.eaMetrics = { ath: res.data.ath || 0, atl: res.data.atl || 0, threshold: res.data.threshold || 0, trade_allowed: res.data.trade_allowed !== false, restriction_reason: res.data.restriction_reason || 'None', grid_eff: res.data.grid_eff || 0, atr: res.data.atr || 0 };
                 this.isTradingPaused = res.data.is_paused || false;
                 if(res.data.last_scan_result) this.scanResult = res.data.last_scan_result;
+                if (res.data.ea_config) {
+                    const c = res.data.ea_config;
+                    this.liveConfig = {
+                        base_lot_size: Number(c.LOT), grid_distance: Number(c.GRID_DISTANCE),
+                        equity_multiplier: Number(c.EQUITY_MULTIPLIER),
+                        tp_low_risk: Number(c.TP_LOW_RISK), tp_med_risk: Number(c.TP_MED_RISK),
+                        tp_high_risk: Number(c.TP_HIGH_RISK),
+                        enable_basket_close: c.ENABLE_BASKET === 'true',
+                        ath_threshold: Number(c.ATH_THRESHOLD),
+                        scan_interval_hours: Number(c.SCAN_INTERVAL_HOURS),
+                        risk_score: Number(c.RISK_SCORE)
+                    };
+                    if (this.currentTab !== 'settings' || !this.settingsDirty) {
+                        this.eaConfig = Object.assign({}, this.eaConfig, this.liveConfig);
+                    }
+                }
                 if (this.isScanning) {
                     const elapsed = Date.now() - (this._scanStartedAt || 0);
                     if (!res.data.scan_in_progress && elapsed > 8000) this.isScanning = false;
@@ -117,10 +140,12 @@ new Vue({
         async saveConfig() {
             try {
                 await axios.post('/api/v1/config/update', this.eaConfig);
+                this.settingsDirty = false;
                 alert('Configuration saved successfully!');
             } catch (e) { alert('Failed to save configuration.'); }
         }
     },
+    watch: { currentTab(v) { if (v === 'settings') { this.settingsDirty = false; this.fetchStatus(); } } },
     mounted() {
         this.fetchStatus();
         this.fetchPauseStatus();

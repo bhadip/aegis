@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0
+- Dynamic Grid Distance: Grid = clamp(ATR_H1(14) x (0.60 + 0.80 x RiskScore/100), GridMin 50, GridMax 300) price points. Static value remains as fallback.
+- Tiered volatility TP per position: TP(tier) = clamp(ATR_H1(14) x TierMult x (1.40 - 0.80 x RiskScore/100), TPMin 5, TPMax 100); TierMult = 1.00 / 0.75 / 0.60 / 0.50 for tiers 1/2/3/4+. Higher risk score lowers TP.
+- Obsolete TP Low/Med/High settings removed from Bridge and Settings UI; EA inputs now own grid/TP tuning.
+- Scan detail: Dashboard lists ALL verified sources with publisher, timestamp, keywords, sentiment and URL (scrollable, mobile-friendly).
+- Telegram scan messages now contain complete headlines (no truncation), guarded to Telegram's 4096-char limit by dropping whole items only.
+- Bugfixes carried from 0.3.10: export endpoint accepts POST; missing getSources() method restored (fixed frozen News tab and stuck "Scanning..." state); live config sync across PC/mobile.
+- Dashboard compliance redesign: PROPOSED, pending user approval (not implemented).
+
 ## 0.3.9 (current)
 - Scan made asynchronous: /api/v1/news/scan acknowledges immediately; scan runs as a background task.
 - scan_in_progress + last_scan_time exposed on /api/v1/status; UI clears "Scanning..." via 2 s polling (8 s grace, 240 s hard cap).

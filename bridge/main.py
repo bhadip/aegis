@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="ExaGuard AEGIS Bridge API v0.3.9")
+app = FastAPI(title="ExaGuard AEGIS Bridge API v0.4.0")
 
 account_status = {"equity": 0.0, "balance": 0.0, "margin_level": 0.0, "active_positions": 0, "status": "Disconnected"}
 ea_metrics = {"ath": 0.0, "atl": 0.0, "threshold": 0.0, "trade_allowed": True, "restriction_reason": "None"}
@@ -18,7 +18,6 @@ scan_in_progress = False
 last_scan_time = None
 ea_config = {
     "LOT": 0.01, "GRID_DISTANCE": 100.0, "EQUITY_MULTIPLIER": 2500,
-    "TP_LOW_RISK": 20, "TP_MED_RISK": 15, "TP_HIGH_RISK": 10,
     "RISK_SCORE": 50, "ENABLE_BASKET": "false",
     "IS_PAUSED": "false", "ATH_THRESHOLD": "0.15", "SCAN_INTERVAL_HOURS": 4
 }
@@ -75,8 +74,15 @@ async def run_scan_logic():
             if risk_score != "N/A":
                 ea_config["RISK_SCORE"] = str(risk_score)
 
-            top_headlines = "\n".join([f"- {a.get('headline', a.get('title', 'N/A'))[:60]}..." for a in sources_list[:3]])
-            send_telegram(f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*\n\n*Top Headlines:*\n{top_headlines}")
+            heads = [str(a.get('headline', a.get('title', 'N/A'))) for a in sources_list[:10]]
+            def build_msg(hl):
+                body = "\n".join([f"- {h}" for h in hl])
+                return f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*\n\n*Headlines:*\n{body}"
+            msg = build_msg(heads)
+            while len(msg) > 4000 and heads:
+                heads.pop()
+                msg = build_msg(heads)
+            send_telegram(msg)
     except Exception as e:
         last_scan_result = {"error": str(e)}
         last_scan_time = datetime.now(timezone.utc).isoformat()
@@ -96,7 +102,6 @@ async def scan_scheduler():
 
 class ConfigUpdate(BaseModel):
     base_lot_size: float; grid_distance: float; equity_multiplier: float
-    tp_low_risk: int; tp_med_risk: int; tp_high_risk: int
     enable_basket_close: bool = False
     ath_threshold: float = 0.15; scan_interval_hours: int = 4
 
@@ -105,19 +110,20 @@ def get_status():
     return {**account_status, **ea_metrics, "is_paused": is_paused,
             "last_scan_result": last_scan_result,
             "scan_in_progress": scan_in_progress,
-            "last_scan_time": last_scan_time}
+            "last_scan_time": last_scan_time,
+            "ea_config": ea_config}
 
 @app.get("/api/v1/ea/status")
 def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: float = 0.0, active_positions: int = 0,
                      ath: float = 0.0, atl: float = 0.0, threshold: float = 0.0, trade_allowed: int = 1,
-                     restriction_reason: str = "None"):
+                     restriction_reason: str = "None", grid_eff: float = 0.0, atr: float = 0.0):
     global account_status, ea_metrics
     new_status = "Disconnected"
     if margin_level > 2000: new_status = "Very Safe"
     elif margin_level > 1000: new_status = "Safe"
     elif margin_level > 0: new_status = "Warning"
     account_status = {"equity": equity, "balance": balance, "margin_level": margin_level, "active_positions": active_positions, "status": new_status}
-    ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason}
+    ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason, "grid_eff": grid_eff, "atr": atr}
     return {"status": "received"}
 
 @app.get("/api/v1/control/pause")
@@ -140,8 +146,6 @@ def update_config(config: ConfigUpdate):
     global ea_config
     ea_config["LOT"] = config.base_lot_size; ea_config["GRID_DISTANCE"] = config.grid_distance
     ea_config["EQUITY_MULTIPLIER"] = config.equity_multiplier
-    ea_config["TP_LOW_RISK"] = config.tp_low_risk; ea_config["TP_MED_RISK"] = config.tp_med_risk
-    ea_config["TP_HIGH_RISK"] = config.tp_high_risk
     ea_config["ENABLE_BASKET"] = str(config.enable_basket_close).lower()
     ea_config["ATH_THRESHOLD"] = str(config.ath_threshold); ea_config["SCAN_INTERVAL_HOURS"] = str(config.scan_interval_hours)
     return {"status": "success"}
@@ -163,7 +167,7 @@ async def get_news_config():
         "active_rss_feeds": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://rss.cnn.com/rss/money_latest.rss"]
     }
 
-@app.get("/api/v1/tools/export")
+@app.api_route("/api/v1/tools/export", methods=["GET", "POST"])
 def trigger_export(days: int = 30):
     file_path = "/app/mt5_ea/Files/data_export.csv"
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
