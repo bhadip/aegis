@@ -1,7 +1,7 @@
 new Vue({
     el: '#app',
     data: {
-        version: '0.9.1',
+        version: '0.10.0',
         currentTab: 'dashboard',
         isMobileMenuOpen: false,
         isMobileMenuOpen: false,
@@ -15,6 +15,8 @@ new Vue({
         scanInterval: 4,
         isScanning: false,
         liveConfig: {},
+        analytics: null,
+        analyticsWindow: '7d',
         settingsDirty: false,
         scanResult: null,
         newsConfig: { active_keywords: [], default_keywords: [], active_rss_feeds: [], default_rss_feeds: [] },
@@ -91,6 +93,13 @@ new Vue({
         }
     },
     methods: {
+        corr(v) { return v === null || v === undefined ? 'n/a' : this.fmt(v, 2); },
+        async fetchAnalytics() {
+            try {
+                const res = await axios.get('/api/v1/analytics/summary?window=' + this.analyticsWindow);
+                this.analytics = res.data;
+            } catch (e) { this.analytics = null; }
+        },
         fmt(v, d) {
             if (v === null || v === undefined || isNaN(v)) v = 0;
             return Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -221,7 +230,8 @@ new Vue({
             } catch (e) { alert('Failed to save configuration.'); }
         }
     },
-    watch: { currentTab(v) { if (v === 'settings') { this.settingsDirty = false; this.fetchStatus(); } } },
+    watch: { currentTab(v) { if (v === 'settings') { this.settingsDirty = false; this.fetchStatus(); }
+            if (v === 'analytics') { this.fetchAnalytics(); } } },
     mounted() {
         this.fetchStatus();
         this.fetchPauseStatus();

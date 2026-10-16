@@ -2,7 +2,7 @@
 //|                                      AEGIS_Captain.mq5           |
 //+------------------------------------------------------------------+
 #property copyright "ExaGuard AI"
-#property version   "0.9.1"
+#property version   "0.10.0"
 #property strict
 
 // LONG (SELL) POSITIONS ARE STRICTLY PROHIBITED. ONLY MARKET BUY IS ALLOWED.
@@ -57,6 +57,11 @@ int prevCount = 0;
 string lastExportId = "0";
 int exportDays = 30;
 string exportPrice = "BID";
+string lastScanId = "0";
+string scanLogId = "0";
+string scanBias = "";
+int scanArticles = 0;
+double scanAvgSent = 0;
 
 int magicNumber = 88888;
 string serverURL = "http://100.75.220.84:8000";
@@ -87,7 +92,7 @@ int OnInit() {
       if(rsiHandles[i] == INVALID_HANDLE || atrHandles[i] == INVALID_HANDLE) { Print("Failed handle ", tfNames[i]); return INIT_FAILED; }
    }
    atrH1Handle = atrHandles[4];
-   Print("AEGIS Captain EA Initialized - Version 0.9.1");
+   Print("AEGIS Captain EA Initialized - Version 0.10.0");
    return INIT_SUCCEEDED;
 }
 
@@ -165,10 +170,24 @@ void DoExport() {
    Print("EXPORT COMPLETE: ", totalRows, " rows over ", exportDays, " days, 6 timeframes.");
 }
 
+void LogScore() {
+   int h = FileOpen("score_log.csv", FILE_CSV|FILE_READ|FILE_WRITE, ',');
+   if(h == INVALID_HANDLE) { Print("score_log.csv open failed"); return; }
+   if(FileSize(h) == 0) FileWrite(h, "timestamp", "scan_id", "risk_score", "bias", "articles", "avg_sent_pct", "bid", "h1_atr");
+   FileSeek(h, 0, SEEK_END);
+   FileWrite(h, TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), lastScanId, IntegerToString(CurrentRiskScore), scanBias,
+             IntegerToString(scanArticles), DoubleToString(scanAvgSent, 0),
+             DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits), DoubleToString(GetATR(), 1));
+   FileClose(h);
+   Print("SCORE LOGGED: ", CurrentRiskScore, " ", scanBias, " n=", scanArticles);
+}
+
 void OnTimer() {
    char postData[]; char result[]; string headers;
    int resGet = WebRequest("GET", serverURL + "/api/v1/ea/config", headers, 2000, postData, result, headers);
    if(resGet == 200) ParseConfig(CharArrayToString(result));
+
+   if(lastScanId != "0" && scanLogId != lastScanId) { scanLogId = lastScanId; LogScore(); }
 
    if(exportRequestId != "0" && exportRequestId != lastExportId) {
       lastExportId = exportRequestId;
@@ -371,6 +390,10 @@ void ParseConfig(string data) {
          if(kv[0] == "EXPORT_REQUEST") exportRequestId = kv[1];
          if(kv[0] == "EXPORT_DAYS") exportDays = (int)StringToInteger(kv[1]);
          if(kv[0] == "EXPORT_PRICE") exportPrice = kv[1];
+         if(kv[0] == "SCAN_ID") lastScanId = kv[1];
+         if(kv[0] == "SCAN_BIAS") scanBias = kv[1];
+         if(kv[0] == "SCAN_ARTICLES") scanArticles = (int)StringToInteger(kv[1]);
+         if(kv[0] == "SCAN_AVG_SENT") scanAvgSent = StringToDouble(kv[1]);
          if(kv[0] == "GRID_MIN") GridMin = StringToDouble(kv[1]);
          if(kv[0] == "GRID_MAX") GridMax = StringToDouble(kv[1]);
          if(kv[0] == "GRID_STEP_PCT") GridStepPct = StringToDouble(kv[1]);

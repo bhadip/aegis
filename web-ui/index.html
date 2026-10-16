@@ -28,6 +28,7 @@
                 <button @click="currentTab = 'dashboard'; isMobileMenuOpen = false" :class="currentTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Dashboard</button>
                 <button @click="currentTab = 'news'; isMobileMenuOpen = false" :class="currentTab === 'news' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">News Intelligence</button>
                 <button @click="currentTab = 'settings'; isMobileMenuOpen = false" :class="currentTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Settings</button>
+            <button @click="currentTab = 'analytics'; isMobileMenuOpen = false" :class="currentTab === 'analytics' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Analytics</button>
             </nav>
             <div class="p-4 border-t border-gray-700 text-xs text-gray-500">Version: {{ version }}</div>
         </aside>
@@ -331,8 +332,52 @@
                     </div>
                 </div>
             </div>
+            <div v-if="currentTab === 'analytics'">
+                <h2 class="text-2xl font-bold mb-4">Scan Analytics</h2>
+                <div class="flex flex-wrap gap-3 items-end mb-4">
+                    <div><label class="block text-xs text-gray-400 mb-1">Window</label>
+                        <select v-model="analyticsWindow" @change="fetchAnalytics" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="7d">7 days</option><option value="30d">30 days</option><option value="all">All time</option>
+                        </select></div>
+                    <button @click="fetchAnalytics" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">Refresh</button>
+                    <a href="/api/v1/analytics/download" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">Download raw CSV</a>
+                </div>
+                <div v-if="analytics">
+                    <p class="text-sm text-gray-400 mb-4">Scans in window: {{ fmt(analytics.have,0) }} &middot; Distribution {{ analytics.progress.dist }} &middot; Accuracy {{ analytics.progress.acc }}</p>
+                    <div v-if="analytics.stats">
+                        <h3 class="text-lg font-bold mb-2">Score distribution</h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Mean</p><p class="text-xl font-bold text-blue-400">{{ fmt(analytics.stats.mean,1) }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Median</p><p class="text-xl font-bold text-blue-400">{{ fmt(analytics.stats.median,1) }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Std Dev</p><p class="text-xl font-bold text-gray-200">{{ fmt(analytics.stats.std,1) }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">P90</p><p class="text-xl font-bold text-amber-300">{{ fmt(analytics.stats.p90,1) }}</p></div>
+                        </div>
+                        <div class="flex items-end gap-1 h-24 bg-gray-800 p-2 rounded border border-gray-700 mb-1">
+                            <div v-for="b in analytics.histogram" :key="b.bin" :style="{height: Math.max(2, b.count / analytics.dist_max * 100) + '%'}" class="flex-1 bg-blue-500 rounded-t" :title="b.bin + ': ' + b.count"></div>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4">Histogram bins 0-100, left to right.</p>
+                    </div>
+                    <p v-else class="text-sm text-amber-300 mb-4">Collecting scans for distribution ({{ analytics.progress.dist }}).</p>
+                    <div v-if="analytics.accuracy_ready">
+                        <h3 class="text-lg font-bold mb-2">Accuracy vs actual .ND movement</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Bullish hit-rate (4h)</p><p class="text-xl font-bold text-green-400">{{ analytics.bias_accuracy.bullish_pct === null ? 'n/a' : fmt(analytics.bias_accuracy.bullish_pct,1) + '%' }}</p><p class="text-xs text-gray-500">n={{ analytics.bias_accuracy.n_bull }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Bearish hit-rate (4h)</p><p class="text-xl font-bold text-red-400">{{ analytics.bias_accuracy.bearish_pct === null ? 'n/a' : fmt(analytics.bias_accuracy.bearish_pct,1) + '%' }}</p><p class="text-xs text-gray-500">n={{ analytics.bias_accuracy.n_bear }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Neutral flat-rate (4h)</p><p class="text-xl font-bold text-gray-200">{{ analytics.bias_accuracy.neutral_flat_pct === null ? 'n/a' : fmt(analytics.bias_accuracy.neutral_flat_pct,1) + '%' }}</p><p class="text-xs text-gray-500">n={{ analytics.bias_accuracy.n_neut }}</p></div>
+                        </div>
+                        <div class="bg-gray-800 p-3 rounded border border-gray-700 text-sm space-y-1 text-gray-300">
+                            <p>Corr(score, 1h return): <span class="text-blue-300">{{ corr(analytics.correlations.h1) }}</span></p>
+                            <p>Corr(score, 4h return): <span class="text-blue-300">{{ corr(analytics.correlations.h4) }}</span></p>
+                            <p>Corr(score, 24h return): <span class="text-blue-300">{{ corr(analytics.correlations.h24) }}</span></p>
+                            <p>Corr(score, |4h return| = volatility): <span class="text-blue-300">{{ corr(analytics.correlations.vol) }}</span></p>
+                        </div>
+                    </div>
+                    <p v-else class="text-sm text-amber-300">Collecting aged scan pairs for accuracy ({{ analytics.progress.acc }}). Accuracy only uses scans old enough that their forward horizon has fully elapsed.</p>
+                </div>
+                <p v-else class="text-sm text-gray-500">No analytics yet. Reports unlock automatically: distribution at 50 scans, accuracy at 100 aged pairs.</p>
+            </div>
         </main>
     </div>
-    <script src="/static/app.js?v=0.9.1"></script>
+    <script src="/static/app.js?v=0.10.0"></script>
 </body>
 </html>

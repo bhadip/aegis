@@ -4,7 +4,8 @@ import time
 import httpx
 import requests
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import csv, bisect
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
@@ -57,27 +58,65 @@ async def run_scan_logic():
             status_resp.raise_for_status()
             data = status_resp.json()
 
-            risk_score = "N/A"
-            bias = "N/A"
-            sources_list = []
-            sent_line = ""
-
-            if isinstance(data, list) and len(data) > 0:
-                sources_list = data
-                scores = [a.get("individual_sentiment_score", 0) for a in data if "individual_sentiment_score" in a]
-                if scores:
-                    avg_sentiment = sum(scores) / len(scores)
-                    risk_score = int((1 - avg_sentiment) * 50)
-                    risk_score = max(0, min(100, risk_score))
-                    if avg_sentiment > 0.1: bias = "Bullish"
-                    elif avg_sentiment < -0.1: bias = "Bearish"
-                    else: bias = "Neutral"
-                    sent_line = f"\nAvg Sentiment: {avg_sentiment*100:.0f}%"
+            articles = []
+            agent_risk = "N/A"
+            agent_bias = "N/A"
+            if isinstance(data, list):
+                articles = data
             elif isinstance(data, dict):
-                risk_score = data.get("risk_score", data.get("score", "N/A"))
-                bias = data.get("bias", data.get("sentiment", "N/A"))
-                sources_list = data.get("verified_sources", data.get("sources", data.get("articles", [])))
-
+                agent_risk = data.get("risk_score", data.get("score", "N/A"))
+                agent_bias = data.get("bias", data.get("sentiment", "N/A"))
+                articles = data.get("articles", data.get("verified_sources", data.get("sources", [])))
+            if not isinstance(articles, list):
+                articles = []
+            seen = set()
+            deduped = []
+            for a in articles:
+                if not isinstance(a, dict):
+                    continue
+                key = a.get("source_url") or a.get("headline") or ""
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(a)
+            scored = [a for a in deduped if isinstance(a.get("individual_sentiment_score"), (int, float))]
+            if scored:
+                avg_sentiment = sum(a["individual_sentiment_score"] for a in scored) / len(scored)
+                risk_score = max(0, min(100, int((1 - avg_sentiment) * 50)))
+                if avg_sentiment > 0.1:
+                    bias = "Bullish"
+                elif avg_sentiment < -0.1:
+                    bias = "Bearish"
+                else:
+                    bias = "Neutral"
+                sent_line = f"\nArticles scored: {len(scored)}\nAvg Sentiment: {avg_sentiment * 100:.0f}%"
+                ea_config["SCAN_ARTICLES"] = str(len(scored))
+                ea_config["SCAN_AVG_SENT"] = f"{avg_sentiment * 100:.0f}"
+                ea_config["SCAN_BIAS"] = bias
+                print(f"SCAN audit: n={len(scored)} avg={avg_sentiment:.4f} risk={risk_score} bias={bias}")
+            else:
+                risk_score = agent_risk
+                bias = agent_bias
+                sent_line = ""
+                ea_config["SCAN_ARTICLES"] = "0"
+                ea_config["SCAN_AVG_SENT"] = "0"
+                ea_config["SCAN_BIAS"] = str(agent_bias)
+                print("SCAN audit: no scored articles, used agent values:", agent_risk, agent_bias)
+            ea_config["SCAN_ID"] = str(int(time.time()))
+            from email.utils import parsedate_to_datetime
+            import datetime as _dtm
+            def _sort_key(item):
+                idx, a = item
+                try:
+                    d = parsedate_to_datetime(a.get("publish_timestamp", ""))
+                    if d is None:
+                        return (1, 0.0, idx)
+                    if d.tzinfo is None:
+                        d = d.replace(tzinfo=_dtm.timezone.utc)
+                    return (0, -d.timestamp(), idx)
+                except Exception:
+                    return (1, 0.0, idx)
+            sources_list = [a for _, a in sorted(enumerate(deduped), key=_sort_key)]
             last_scan_result = {
                 "risk_score": risk_score,
                 "bias": (bias + " Bias") if (bias != "N/A" and not str(bias).endswith("Bias")) else bias,
@@ -243,6 +282,99 @@ def download_data():
     file_path = "/app/mt5_ea/Files/data_export.csv"
     if os.path.exists(file_path): return FileResponse(file_path, media_type='text/csv', filename='aegis_data_export.csv')
     raise HTTPException(status_code=404, detail="No exported data found.")
+
+
+LOG_PATH = "/app/mt5_ea/Files/score_log.csv"
+DIST_NEED = 50
+ACC_NEED = 100
+
+def _read_log():
+    rows = []
+    if not os.path.exists(LOG_PATH):
+        return rows
+    with open(LOG_PATH, newline='') as f:
+        for row in csv.DictReader(f):
+            try:
+                row['ts'] = datetime.strptime(row['timestamp'], '%Y.%m.%d %H:%M:%S')
+                row['bid'] = float(row['bid']); row['risk_score'] = float(row['risk_score'])
+                rows.append(row)
+            except Exception:
+                continue
+    return rows
+
+def _pearson(xs, ys):
+    n = len(xs)
+    if n < 3:
+        return None
+    mx = sum(xs) / n; my = sum(ys) / n
+    sx = sum((x - mx) ** 2 for x in xs) ** 0.5; sy = sum((y - my) ** 2 for y in ys) ** 0.5
+    if sx == 0 or sy == 0:
+        return None
+    return round(sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (sx * sy), 3)
+
+@app.get("/api/v1/analytics/summary")
+def analytics_summary(window: str = "7d"):
+    rows = _read_log()
+    now = datetime.now()
+    cutoff = now - timedelta(days=7 if window == "7d" else (30 if window == "30d" else 36500))
+    sel = [r for r in rows if r['ts'] >= cutoff]
+    out = {"window": window, "have": len(sel),
+           "progress": {"dist": f"{len(sel)}/{DIST_NEED}", "acc": ""},
+           "distribution_ready": len(sel) >= DIST_NEED, "accuracy_ready": False,
+           "stats": None, "histogram": [], "dist_max": 1, "by_hour": [],
+           "correlations": {"h1": None, "h4": None, "h24": None, "vol": None},
+           "bias_accuracy": None}
+    scores = [r['risk_score'] for r in sel]
+    if len(sel) >= DIST_NEED:
+        so = sorted(scores)
+        q = lambda p: so[min(len(so) - 1, int(p * len(so)))]
+        out["stats"] = {"mean": round(sum(scores) / len(scores), 1), "median": q(0.5),
+                        "std": round((sum((x - sum(scores)/len(scores))**2 for x in scores)/len(scores)) ** 0.5, 1),
+                        "min": so[0], "max": so[-1], "p25": q(0.25), "p75": q(0.75), "p90": q(0.9)}
+        hist = [{"bin": f"{b}-{b+10}", "count": sum(1 for x in scores if b <= x < b + 10)} for b in range(0, 100, 10)]
+        out["histogram"] = hist
+        out["dist_max"] = max(1, max(h["count"] for h in hist))
+        hours = {}
+        for r in sel:
+            hours.setdefault(r['ts'].hour, []).append(r['risk_score'])
+        out["by_hour"] = [{"hour": h, "mean": round(sum(v)/len(v), 1), "n": len(v)} for h, v in sorted(hours.items())]
+    pts = sorted([(r['ts'], r['bid'], r['risk_score'], r['bias']) for r in sel])
+    tsl = [p[0] for p in pts]
+    def fwd(i, hours):
+        target = pts[i][0] + timedelta(hours=hours)
+        j = bisect.bisect_left(tsl, target)
+        if j >= len(pts) or pts[j][0] > target + timedelta(hours=max(2, hours // 2)):
+            return None
+        return (pts[j][1] - pts[i][1]) / pts[i][1] * 100.0
+    pairs = {1: [], 4: [], 24: []}
+    for i in range(len(pts)):
+        age_h = (now - pts[i][0]).total_seconds() / 3600.0
+        for h in (1, 4, 24):
+            if age_h >= h + 0.5:
+                f = fwd(i, h)
+                if f is not None:
+                    pairs[h].append((pts[i][2], f, pts[i][3]))
+    out["progress"]["acc"] = f"{len(pairs[4])}/{ACC_NEED}"
+    if len(pairs[4]) >= ACC_NEED:
+        out["accuracy_ready"] = True
+        out["correlations"] = {
+            "h1": _pearson([p[0] for p in pairs[1]], [p[1] for p in pairs[1]]),
+            "h4": _pearson([p[0] for p in pairs[4]], [p[1] for p in pairs[4]]),
+            "h24": _pearson([p[0] for p in pairs[24]], [p[1] for p in pairs[24]]),
+            "vol": _pearson([p[0] for p in pairs[4]], [abs(p[1]) for p in pairs[4]])}
+        bull = [p for p in pairs[4] if p[2] == "Bullish"]; bear = [p for p in pairs[4] if p[2] == "Bearish"]
+        neut = [p for p in pairs[4] if p[2] == "Neutral"]
+        pct = lambda arr, fn: round(100.0 * sum(1 for p in arr if fn(p)) / len(arr), 1) if arr else None
+        out["bias_accuracy"] = {"bullish_pct": pct(bull, lambda p: p[1] > 0), "bearish_pct": pct(bear, lambda p: p[1] < 0),
+                                "neutral_flat_pct": pct(neut, lambda p: abs(p[1]) < 0.25),
+                                "n_bull": len(bull), "n_bear": len(bear), "n_neut": len(neut)}
+    return out
+
+@app.get("/api/v1/analytics/download")
+def analytics_download():
+    if os.path.exists(LOG_PATH):
+        return FileResponse(LOG_PATH, media_type='text/csv', filename='score_log.csv')
+    raise HTTPException(status_code=404, detail='No log yet')
 
 app.mount("/static", StaticFiles(directory="web-ui"), name="static")
 

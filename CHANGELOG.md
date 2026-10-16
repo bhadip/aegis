@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0
+- Includes the previously undeployed v0.9.2 scan-consistency fixes (single-source risk computation, dedup, recency-sorted headlines, Articles-scored/Avg-Sentiment in Telegram and logs).
+- EA logs one row per scan to mt5_ea/Files/score_log.csv (timestamp, scan_id, risk, bias, articles, avg sentiment, bid, H1 ATR).
+- Bridge analytics endpoints /api/v1/analytics/summary and /download; sufficiency-gated: distribution at 50 scans, accuracy at 100 aged forward-return pairs (1h/4h/24h horizons computed only from later logged bids, never future data).
+- New Analytics tab: window selector, histogram, percentiles, bias hit-rates, score-vs-return and score-vs-volatility correlations, raw CSV download.
+
 ## 0.6.0
 - Compile fix: SendChunk header string escape corrected (literal backslash-r-n), resolving "closing quote expected" errors at lines 123-125.
 - Formula coefficients now configurable from Dashboard Settings (Formula Tuning section) and synced to the EA every 5 s: GRID_MIN, GRID_MAX, GRID_STEP_PCT, TP_MIN, TP_MAX, TP_T1_MULT, TP_TIER_STEP, TP_TIER_MAX.
