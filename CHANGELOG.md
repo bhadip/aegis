@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0
+- Cloudflare Access integration: Bridge verifies CF_Authorization JWT (signed by Cloudflare JWKS) to identify authenticated users; session cookie tracks login state across requests.
+- Role-based access control: users.json defines Admin (bhadip@gmail.com) and Fund Manager (tom@prasanti.com) roles; Admin-only User Management tab (add/update/remove users, enable/disable).
+- Login/logout flow: /api/v1/auth/me checks session; logout clears Bridge session and redirects to Cloudflare Access logout URL.
+- Protected routes: analytics, config updates, scan trigger, export, pause control now require valid session; EA status/config endpoints remain public (private network only).
+- UI: role display in header, logout button, User Management tab (Admin only), auto-redirect to Access login if no session.
+- Cloudflare Access apps created: aegis.prasanti.com (web) and ea-aegis.prasanti.com (VNC) with "registered-users" policy.
+
+## 0.11.0
+- Web app host port changed 8000 -> 9191 (container-internal 8000 unchanged); EA serverURL updated; 10-instance port scheme documented (web 9190+i, VNC 9090+i).
+- Exposure cap now visible: Rule Compliance Exposure chip turns red with "cap: 0.04+0.01 > 0.0488" and the Algo Trading Status card shows the waiting reason, so a new user can see why entries stop at max positions.
+- Dashboard shows when 4-week ATH and ATL were reached (H1 bar time) and the Range (ATH-ATL), making Pause Threshold = ATL + Range x 85% fully verifiable.
+- Dashboard quick-link "Open MT5 Terminal (VNC)" (EA_PUBLIC_URL env, default http://100.75.220.84:9091) so Fund Managers need only the web URL.
+
 ## 0.10.0
 - Includes the previously undeployed v0.9.2 scan-consistency fixes (single-source risk computation, dedup, recency-sorted headlines, Articles-scored/Avg-Sentiment in Telegram and logs).
 - EA logs one row per scan to mt5_ea/Files/score_log.csv (timestamp, scan_id, risk, bias, articles, avg sentiment, bid, H1 ATR).

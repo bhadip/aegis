@@ -1,7 +1,7 @@
 new Vue({
     el: '#app',
     data: {
-        version: '0.10.0',
+        version: '0.12.0',
         currentTab: 'dashboard',
         isMobileMenuOpen: false,
         isMobileMenuOpen: false,
@@ -38,7 +38,10 @@ new Vue({
             const h1ok = !m.g_h1 || m.g_h1 >= (m.g_h1min || 30);
             g.push({ label: 'H1 Trend', state: h1ok ? 'ok' : 'bad', text: h1ok ? ('RSI ' + this.fmt(m.g_h1, 0)) : ('RSI ' + this.fmt(m.g_h1, 0) + ' < ' + this.fmt(m.g_h1min, 0)) });
             g.push({ label: 'ATH Zone', state: (m.g_athpct || 0) <= 85 ? 'ok' : 'bad', text: this.fmt(m.g_athpct, 0) + '%' });
-            g.push({ label: 'Exposure', state: (m.g_lots || 0) < (m.g_lotmax || 0) ? 'ok' : 'bad', text: this.fmt(m.g_lots, 2) + '/' + this.fmt(m.g_lotmax, 2) });
+            const lot = (this.liveConfig && this.liveConfig.base_lot_size) || 0.01;
+            const need = (m.g_lots || 0) + lot;
+            g.push({ label: 'Exposure', state: need <= (m.g_lotmax || 0) + 1e-9 ? 'ok' : 'bad',
+                     text: need <= (m.g_lotmax || 0) + 1e-9 ? (this.fmt(m.g_lots, 2) + ' / ' + this.fmt(m.g_lotmax, 2)) : ('cap: ' + this.fmt(m.g_lots, 2) + '+' + this.fmt(lot, 2) + ' > ' + this.fmt(m.g_lotmax, 2)) });
             if (!m.pos) g.push({ label: 'Grid', state: 'ok', text: 'first entry' });
             else g.push({ label: 'Grid', state: (m.g_dist || 0) >= (m.g_need || 0) ? 'ok' : 'wait', text: this.fmt(m.g_dist, 0) + ' of ' + this.fmt(m.g_need, 0) + ' pts' });
             g.push({ label: 'Hook', state: (m.restriction_reason === 'None') ? 'ok' : 'wait', text: (m.restriction_reason === 'None') ? 'triggered' : (m.g_hook || 'waiting') });
@@ -93,6 +96,45 @@ new Vue({
         }
     },
     methods: {
+        async checkAuth() {
+            try {
+                const res = await axios.get('/api/v1/auth/me');
+                this.currentUser = res.data;
+            } catch (e) {
+                this.currentUser = null;
+                console.log("Not authenticated via Cloudflare Access (expected on local IP)");
+            }
+        },
+        async logout() {
+            try {
+                await axios.post('/api/v1/auth/logout');
+            } catch (e) {}
+            this.currentUser = null;
+            window.location.href = '/cdn-cgi/access/logout';
+        },
+        async fetchUsers() {
+            try {
+                const res = await axios.get('/api/v1/admin/users');
+                this.allUsers = res.data.users;
+            } catch (e) {
+                this.allUsers = [];
+            }
+        },
+        async addUser(email, role) {
+            try {
+                await axios.post('/api/v1/admin/users', {email, role, enabled: true});
+                await this.fetchUsers();
+                alert('User added/updated');
+            } catch (e) { alert('Failed: ' + (e.response?.data?.detail || e.message)); }
+        },
+        async removeUser(email) {
+            if (!confirm('Remove user ' + email + '?')) return;
+            try {
+                await axios.delete('/api/v1/admin/users?email=' + encodeURIComponent(email));
+                await this.fetchUsers();
+            } catch (e) { alert('Failed: ' + (e.response?.data?.detail || e.message)); }
+        },
+        fmtDate(ts) { if (!ts) return '—'; return new Date(ts * 1000).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); },
         corr(v) { return v === null || v === undefined ? 'n/a' : this.fmt(v, 2); },
         async fetchAnalytics() {
             try {
@@ -143,7 +185,8 @@ new Vue({
                           g_lots: res.data.g_lots || 0, g_lotmax: res.data.g_lotmax || 0,
                           g_dist: res.data.g_dist || 0, g_need: res.data.g_need || 0,
                           g_hook: res.data.g_hook || "", g_cur: res.data.g_cur || 0,
-                          pos: res.data.pos || "", last_action: res.data.last_action || "" };
+                          pos: res.data.pos || "", last_action: res.data.last_action || "",
+                          ath_t: res.data.ath_t || 0, atl_t: res.data.atl_t || 0, ea_url: res.data.ea_url || '' };
                 this.isTradingPaused = res.data.is_paused || false;
                 if(res.data.last_scan_result) this.scanResult = res.data.last_scan_result;
                 if (res.data.ea_config) {
@@ -233,6 +276,8 @@ new Vue({
     watch: { currentTab(v) { if (v === 'settings') { this.settingsDirty = false; this.fetchStatus(); }
             if (v === 'analytics') { this.fetchAnalytics(); } } },
     mounted() {
+        this.checkAuth();
+        setInterval(() => { if (this.currentTab === 'users') this.fetchUsers(); }, 5000);
         this.fetchStatus();
         this.fetchPauseStatus();
         this.fetchNewsConfig();

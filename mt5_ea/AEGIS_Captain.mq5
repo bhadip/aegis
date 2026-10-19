@@ -2,7 +2,7 @@
 //|                                      AEGIS_Captain.mq5           |
 //+------------------------------------------------------------------+
 #property copyright "ExaGuard AI"
-#property version   "0.10.0"
+#property version   "0.11.0"
 #property strict
 
 // LONG (SELL) POSITIONS ARE STRICTLY PROHIBITED. ONLY MARKET BUY IS ALLOWED.
@@ -64,7 +64,7 @@ int scanArticles = 0;
 double scanAvgSent = 0;
 
 int magicNumber = 88888;
-string serverURL = "http://100.75.220.84:8000";
+string serverURL = "http://100.75.220.84:9191";
 int lastMinute = -1;
 int rsiHandles[6];
 int atrHandles[6];
@@ -92,7 +92,7 @@ int OnInit() {
       if(rsiHandles[i] == INVALID_HANDLE || atrHandles[i] == INVALID_HANDLE) { Print("Failed handle ", tfNames[i]); return INIT_FAILED; }
    }
    atrH1Handle = atrHandles[4];
-   Print("AEGIS Captain EA Initialized - Version 0.10.0");
+   Print("AEGIS Captain EA Initialized - Version 0.11.0");
    return INIT_SUCCEEDED;
 }
 
@@ -209,6 +209,8 @@ void OnTimer() {
    bool trade_allowed = MQLInfoInteger(MQL_TRADE_ALLOWED);
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double h1Rsi = GetRSI(4);
+   datetime athT = iTime(_Symbol, PERIOD_H1, ArrayMaximum(high));
+   datetime atlT = iTime(_Symbol, PERIOD_H1, ArrayMinimum(low));
 
    int openCount = 0; double lowestPrice = DBL_MAX; double curLots = 0;
    ulong curTickets[32]; int curCount = 0; double rawEntries[16]; double rawTps[16];
@@ -256,6 +258,7 @@ void OnTimer() {
    else if(margin_level < 1000) restriction_reason = "Margin Level < 1000%";
    else if(UseH1RSIFilter && h1Rsi < MinH1RSI) restriction_reason = "H1 RSI < " + DoubleToString(MinH1RSI,1);
    else if(currentPrice > pause_threshold) restriction_reason = "Price in Top 15% of 4-Week Range";
+   else if(curLots + CurrentLot > (equity / CurrentEquityMultiplier) * 0.01 + 0.0009) restriction_reason = "Exposure cap reached (" + DoubleToString(curLots,2) + " + " + DoubleToString(CurrentLot,2) + " > " + DoubleToString((equity / CurrentEquityMultiplier) * 0.01,2) + " lots)";
    else if(openCount > 0) {
       double need = NextGap(openCount, gridEff);
       double dist = lowestPrice - currentPrice;
@@ -281,6 +284,8 @@ void OnTimer() {
                       "&trade_allowed=" + (trade_allowed ? "1" : "0") +
                       "&grid_eff=" + DoubleToString(gridEff, 1) +
                       "&atr=" + DoubleToString(lastATR, 1) +
+                      "&ath_t=" + IntegerToString((long)athT) +
+                      "&atl_t=" + IntegerToString((long)atlT) +
                       "&restriction_reason=" + restriction_reason +
                       "&g_h1=" + DoubleToString(h1Rsi,1) +
                       "&g_h1min=" + DoubleToString(MinH1RSI,1) +

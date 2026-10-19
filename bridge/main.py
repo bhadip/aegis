@@ -8,8 +8,76 @@ from datetime import datetime, timezone, timedelta
 import csv, bisect
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi import Depends, HTTPException
+import jwt
+import requests as req_lib
+from typing import Optional
+import hashlib
 from pydantic import BaseModel
+
+
+
+
+
+CLOUDFLARE_TEAM_DOMAIN = "delicate-brook-2c40.cloudflareaccess.com"
+JWKS_URL = f"https://{CLOUDFLARE_TEAM_DOMAIN}/cdn-cgi/access/certs"
+USERS_PATH = "/app/users.json"
+SESSION_SECRET = os.getenv("SESSION_SECRET", "aegis-session-key-change-in-prod")
+ACCESS_LOGOUT_URL = f"https://{CLOUDFLARE_TEAM_DOMAIN}/cdn-cgi/access/logout"
+
+_jwks_cache = None
+def get_jwks():
+    global _jwks_cache
+    if not _jwks_cache:
+        _jwks_cache = __import__('requests').get(JWKS_URL, timeout=5).json()
+    return _jwks_cache
+
+def verify_jwt(token: str):
+    import jwt
+    try:
+        jwks = get_jwks()
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+        public_key = None
+        for key in jwks.get("keys", []):
+            if key["kid"] == kid:
+                public_key = jwt.algorithms.RSAAlgorithm.from_jwk(__import__('json').dumps(key))
+                break
+        if not public_key:
+            return None
+        decoded = jwt.decode(token, public_key, algorithms=["RS256"], audience=jwks.get("audience", []))
+        return decoded.get("email")
+    except Exception as e:
+        print(f"JWT verify failed: {e}")
+        return None
+
+def get_current_user(request):
+    token = request.cookies.get("aegis_session")
+    if token:
+        email = verify_jwt(token)
+        if email:
+            import json
+            users = json.load(open(USERS_PATH))
+            for u in users["users"]:
+                if u["email"] == email and u["enabled"]:
+                    return u
+    return None
+
+def require_auth(request):
+    user = get_current_user(request)
+    if not user:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+def require_admin(request):
+    user = require_auth(request)
+    if user["role"] != "admin":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Admin required")
+    return user
+
 
 app = FastAPI(title="ExaGuard AEGIS Bridge API v0.7.1")
 
@@ -35,6 +103,7 @@ try:
 except Exception as e:
     print("Defaults load error:", e)
 
+EA_PUBLIC_URL = os.getenv("EA_PUBLIC_URL", "http://100.75.220.84:9091")
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -165,6 +234,42 @@ class ConfigUpdate(BaseModel):
     tp_min: float = 10.0; tp_max: float = 100.0
     tp_t1_mult: float = 0.6; tp_tier_step: float = 0.2; tp_tier_max: float = 1.4
 
+
+@app.get("/api/v1/auth/me")
+def auth_me(user: dict = Depends(require_auth)):
+    return {"email": user["email"], "role": user["role"]}
+
+@app.post("/api/v1/auth/logout")
+def auth_logout(response: JSONResponse):
+    response.delete_cookie("aegis_session")
+    return {"status": "logged_out", "access_logout_url": ACCESS_LOGOUT_URL}
+
+@app.get("/api/v1/admin/users")
+def admin_list_users(user: dict = Depends(require_admin)):
+    users = json.load(open(USERS_PATH))
+    return users
+
+@app.post("/api/v1/admin/users")
+async def admin_add_user(request: Request, user: dict = Depends(require_admin)):
+    data = await request.json()
+    users = json.load(open(USERS_PATH))
+    for u in users["users"]:
+        if u["email"] == data["email"]:
+            u["role"] = data["role"]
+            u["enabled"] = data.get("enabled", True)
+            json.dump(users, open(USERS_PATH, 'w'), indent=2)
+            return {"status": "updated"}
+    users["users"].append({"email": data["email"], "role": data["role"], "enabled": data.get("enabled", True)})
+    json.dump(users, open(USERS_PATH, 'w'), indent=2)
+    return {"status": "added"}
+
+@app.delete("/api/v1/admin/users")
+def admin_remove_user(email: str, user: dict = Depends(require_admin)):
+    users = json.load(open(USERS_PATH))
+    users["users"] = [u for u in users["users"] if u["email"] != email]
+    json.dump(users, open(USERS_PATH, 'w'), indent=2)
+    return {"status": "removed"}
+
 @app.get("/api/v1/status")
 def get_status():
     return {**account_status, **ea_metrics, "is_paused": is_paused,
@@ -179,7 +284,8 @@ def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: fl
                      restriction_reason: str = "None", grid_eff: float = 0.0, atr: float = 0.0,
                      g_h1: float = 0.0, g_h1min: float = 0.0, g_athpct: float = 0.0,
                      g_lots: float = 0.0, g_lotmax: float = 0.0, g_dist: float = 0.0, g_need: float = 0.0,
-                     g_hook: str = "", g_cur: float = 0.0, pos: str = "", last_action: str = ""):
+                     g_hook: str = "", g_cur: float = 0.0, pos: str = "", last_action: str = "",
+                     ath_t: int = 0, atl_t: int = 0):
     global account_status, ea_metrics
     new_status = "Disconnected"
     if margin_level > 2000: new_status = "Very Safe"
@@ -189,7 +295,7 @@ def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: fl
     ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason, "grid_eff": grid_eff, "atr": atr,
                   "g_h1": g_h1, "g_h1min": g_h1min, "g_athpct": g_athpct, "g_lots": g_lots,
                   "g_lotmax": g_lotmax, "g_dist": g_dist, "g_need": g_need, "g_hook": g_hook,
-                  "g_cur": g_cur, "pos": pos, "last_action": last_action}
+                  "g_cur": g_cur, "pos": pos, "last_action": last_action, "ath_t": ath_t, "atl_t": atl_t, "ea_url": EA_PUBLIC_URL}
     return {"status": "received"}
 
 @app.get("/api/v1/control/pause")
@@ -222,7 +328,7 @@ def update_config(config: ConfigUpdate):
     return {"status": "success"}
 
 @app.api_route("/api/v1/news/scan", methods=["GET", "POST"])
-async def trigger_scan():
+async def trigger_scan(user: dict = Depends(require_auth)):
     # Fire-and-forget: acknowledge immediately, scan runs in background
     if scan_in_progress:
         return {"status": "already_running"}
@@ -239,7 +345,7 @@ async def get_news_config():
     }
 
 @app.api_route("/api/v1/tools/export", methods=["GET", "POST"])
-def trigger_export(days: int = 30, price: str = "BID"):
+def trigger_export(user: dict = Depends(require_auth), days: int = 30, price: str = "BID"):
     file_path = "/app/mt5_ea/Files/data_export.csv"
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, 'w') as f:
@@ -379,5 +485,11 @@ def analytics_download():
 app.mount("/static", StaticFiles(directory="web-ui"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
-async def read_root():
-    with open("web-ui/index.html", "r") as f: return f.read()
+async def read_root(request: Request):
+    user = get_current_user(request)
+    with open("web-ui/index.html", "r") as f: html = f.read()
+    if user:
+        html = html.replace('__USER_EMAIL__', user["email"]).replace('__USER_ROLE__', user["role"])
+    else:
+        html = html.replace('__USER_EMAIL__', '').replace('__USER_ROLE__', '')
+    return html

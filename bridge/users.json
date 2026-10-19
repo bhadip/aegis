@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "email": "bhadip@gmail.com",
+      "role": "admin",
+      "enabled": true
+    },
+    {
+      "email": "tom@prasanti.com",
+      "role": "fund_manager",
+      "enabled": true
+    }
+  ]
+}

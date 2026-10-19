@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   aegis-mt5:
@@ -26,10 +25,11 @@ services:
     container_name: aegis-bridge
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "9191:8000"
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - EA_PUBLIC_URL=https://ea-aegis.prasanti.com
       - MT5_ZMQ_PORT=5555
     volumes:
       - ./bridge:/app
