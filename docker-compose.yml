@@ -5,7 +5,7 @@ services:
     container_name: aegis-mt5
     restart: unless-stopped
     ports:
-      - "9091:3000"
+      - "9091:6901"
     volumes:
       # Fix: Use /config/.wine path (linuxserver.io standard)
       - /home/tom/mql-zmq/Include/Zmq:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Include/Zmq
@@ -13,6 +13,7 @@ services:
       - /home/tom/aegis/mt5_ea/AEGIS_Captain.mq5:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Experts/AEGIS_Captain.mq5
       - aegis-mt5-data:/config/.wine/drive_c/Program Files/MetaTrader 5
       - ./custom_scripts/mt4_run:/etc/services.d/mt4/run:ro
+      - ./bridge/mt5_ea/Files:/config/.wine/drive_c/Program Files/MetaTrader 5/MQL5/Files
     networks:
       - aegis-net
     deploy:
@@ -32,6 +33,7 @@ services:
       - EA_PUBLIC_URL=https://ea-aegis.prasanti.com
       - MT5_ZMQ_PORT=5555
     volumes:
+      - /home/tom/aegis/bridge/mt5_ea/Files:/app/mt5_ea/Files
       - ./bridge:/app
       - ./web-ui:/app/web-ui
     networks:
@@ -51,6 +53,7 @@ services:
       - NEWS_SCAN_SCHEDULE=${NEWS_SCAN_SCHEDULE:-0 8 * * *}
       - BRIDGE_API_URL=http://aegis-bridge:8000
     volumes:
+      - /home/tom/aegis/bridge/mt5_ea/Files:/app/mt5_ea/Files
       - ./news-agent:/app
     networks:
       - aegis-net

@@ -1,7 +1,11 @@
-new Vue({
+window.app = new Vue({
     el: '#app',
     data: {
-        version: '0.12.0',
+        currentUser: null,
+        allUsers: [],
+        newUserEmail: "",
+        newUserRole: "fund_manager",
+        version: '0.12.10',
         currentTab: 'dashboard',
         isMobileMenuOpen: false,
         isMobileMenuOpen: false,
@@ -102,21 +106,27 @@ new Vue({
                 this.currentUser = res.data;
             } catch (e) {
                 this.currentUser = null;
-                console.log("Not authenticated via Cloudflare Access (expected on local IP)");
+                console.log('Not authenticated via Cloudflare Access');
             }
         },
         async logout() {
             try {
                 await axios.post('/api/v1/auth/logout');
-            } catch (e) {}
+            } catch (e) {
+                console.log('Logout API failed:', e);
+            }
             this.currentUser = null;
+            document.cookie = "CF_Authorization=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            document.cookie = "CF_AppSession=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
             window.location.href = '/cdn-cgi/access/logout';
         },
         async fetchUsers() {
             try {
                 const res = await axios.get('/api/v1/admin/users');
-                this.allUsers = res.data.users;
+                this.allUsers = res.data.users || [];
+                console.log('Fetched users:', this.allUsers);
             } catch (e) {
+                console.error('Failed to fetch users:', e);
                 this.allUsers = [];
             }
         },
@@ -125,15 +135,20 @@ new Vue({
                 await axios.post('/api/v1/admin/users', {email, role, enabled: true});
                 await this.fetchUsers();
                 alert('User added/updated');
-            } catch (e) { alert('Failed: ' + (e.response?.data?.detail || e.message)); }
+            } catch (e) { 
+                alert('Failed: ' + (e.response?.data?.detail || e.message)); 
+            }
         },
         async removeUser(email) {
             if (!confirm('Remove user ' + email + '?')) return;
             try {
                 await axios.delete('/api/v1/admin/users?email=' + encodeURIComponent(email));
                 await this.fetchUsers();
-            } catch (e) { alert('Failed: ' + (e.response?.data?.detail || e.message)); }
+            } catch (e) { 
+                alert('Failed: ' + (e.response?.data?.detail || e.message)); 
+            }
         },
+
         fmtDate(ts) { if (!ts) return '—'; return new Date(ts * 1000).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); },
         corr(v) { return v === null || v === undefined ? 'n/a' : this.fmt(v, 2); },
         async fetchAnalytics() {
@@ -277,6 +292,7 @@ new Vue({
             if (v === 'analytics') { this.fetchAnalytics(); } } },
     mounted() {
         this.checkAuth();
+        if (this.currentTab === "analytics") this.fetchAnalytics();
         setInterval(() => { if (this.currentTab === 'users') this.fetchUsers(); }, 5000);
         this.fetchStatus();
         this.fetchPauseStatus();

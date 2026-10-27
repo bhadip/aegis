@@ -42,7 +42,7 @@
 - Bugfixes carried from 0.3.10: export endpoint accepts POST; missing getSources() method restored (fixed frozen News tab and stuck "Scanning..." state); live config sync across PC/mobile.
 - Dashboard compliance redesign: PROPOSED, pending user approval (not implemented).
 
-## 0.3.9 (current)
+## 0.11.1 (current)
 - Scan made asynchronous: /api/v1/news/scan acknowledges immediately; scan runs as a background task.
 - scan_in_progress + last_scan_time exposed on /api/v1/status; UI clears "Scanning..." via 2 s polling (8 s grace, 240 s hard cap).
 - Hard timeouts on all outbound calls: News Agent scan 45 s, status 15 s, Telegram 10 s.
@@ -69,9 +69,9 @@
 
 ## Known Issues (open)
 
-### News scan never completes (observed through 0.3.9)
+### News scan never completes (observed through 0.11.1)
 - Symptom: "Run Scan Now" stays in "Scanning..."; no dashboard result; no Telegram summary. Scheduled scans likewise produce nothing.
-- Not yet resolved by: async refactor, timeouts, structured parsing, cache-busting (0.3.9).
+- Not yet resolved by: async refactor, timeouts, structured parsing, cache-busting (0.11.1).
 - Hypotheses:
   1. News Agent GET /api/v1/news/scan blocks or deadlocks internally (single-worker event loop blocked by synchronous feed fetching).
   2. /api/v1/news/status returns a shape the parser treats as empty after a fresh trigger (scan state reset before read).

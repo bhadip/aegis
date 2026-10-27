@@ -1,8 +1,8 @@
 {
   "LOT": 0.01,
   "GRID_DISTANCE": 100.0,
-  "EQUITY_MULTIPLIER": 2000.0,
-  "RISK_SCORE": 50,
+  "EQUITY_MULTIPLIER": 1000.0,
+  "RISK_SCORE": "50",
   "ENABLE_BASKET": "false",
   "IS_PAUSED": "false",
   "ATH_THRESHOLD": "0.15",
@@ -14,8 +14,12 @@
   "GRID_MAX": "300.0",
   "GRID_STEP_PCT": "25.0",
   "TP_MIN": "10.0",
-  "TP_MAX": "100.0",
-  "TP_T1_MULT": "0.6",
+  "TP_MAX": "120.0",
+  "TP_T1_MULT": "0.1",
   "TP_TIER_STEP": "0.2",
-  "TP_TIER_MAX": "1.4"
+  "TP_TIER_MAX": "1.4",
+  "SCAN_ARTICLES": "5",
+  "SCAN_AVG_SENT": "-2",
+  "SCAN_BIAS": "Neutral",
+  "SCAN_ID": "1792632103"
 }

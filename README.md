@@ -1,6 +1,6 @@
 # ExaGuard AEGIS
 
-**Autonomous Execution & Grid Intelligence System** - Version **0.3.9**
+**Autonomous Execution & Grid Intelligence System** - Version **0.11.1**
 
 > Disclaimer: This is an experimental automated trading research system.
 > Nothing here constitutes financial or investment advice. Automated trading carries substantial risk of loss.

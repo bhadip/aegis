@@ -46,32 +46,40 @@ def verify_jwt(token: str):
                 break
         if not public_key:
             return None
-        decoded = jwt.decode(token, public_key, algorithms=["RS256"], audience=jwks.get("audience", []))
+        decoded = jwt.decode(token, public_key, algorithms=["RS256"], options={"verify_aud": False})
         return decoded.get("email")
     except Exception as e:
         print(f"JWT verify failed: {e}")
         return None
 
-def get_current_user(request):
-    token = request.cookies.get("aegis_session")
-    if token:
-        email = verify_jwt(token)
-        if email:
-            import json
-            users = json.load(open(USERS_PATH))
-            for u in users["users"]:
-                if u["email"] == email and u["enabled"]:
-                    return u
+def get_current_user(request: Request):
+    token = request.cookies.get("CF_Authorization")
+    if not token:
+        print("DEBUG: No CF_Authorization cookie found in request", flush=True)
+        return None
+    email = verify_jwt(token)
+    if not email:
+        print("DEBUG: JWT verification failed for token", flush=True)
+        return None
+    import json
+    users = json.load(open(USERS_PATH))
+    for u in users["users"]:
+        if u["email"] == email and u["enabled"]:
+            print(f"DEBUG: Authenticated user {email} as {u['role']}", flush=True)
+            return u
+    print(f"DEBUG: User {email} not found in users.json or disabled", flush=True)
     return None
 
-def require_auth(request):
+
+def require_auth(request: Request):
+    print("DEBUG: require_auth was called!", flush=True)
     user = get_current_user(request)
     if not user:
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
 
-def require_admin(request):
+def require_admin(request: Request):
     user = require_auth(request)
     if user["role"] != "admin":
         from fastapi import HTTPException

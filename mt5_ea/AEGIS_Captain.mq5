@@ -2,7 +2,7 @@
 //|                                      AEGIS_Captain.mq5           |
 //+------------------------------------------------------------------+
 #property copyright "ExaGuard AI"
-#property version   "0.11.0"
+#property version "0.11.1"
 #property strict
 
 // LONG (SELL) POSITIONS ARE STRICTLY PROHIBITED. ONLY MARKET BUY IS ALLOWED.
@@ -92,7 +92,7 @@ int OnInit() {
       if(rsiHandles[i] == INVALID_HANDLE || atrHandles[i] == INVALID_HANDLE) { Print("Failed handle ", tfNames[i]); return INIT_FAILED; }
    }
    atrH1Handle = atrHandles[4];
-   Print("AEGIS Captain EA Initialized - Version 0.11.0");
+   Print("AEGIS Captain EA Initialized - Version 0.11.1");
    return INIT_SUCCEEDED;
 }
 
@@ -171,15 +171,21 @@ void DoExport() {
 }
 
 void LogScore() {
-   int h = FileOpen("score_log.csv", FILE_CSV|FILE_READ|FILE_WRITE, ',');
-   if(h == INVALID_HANDLE) { Print("score_log.csv open failed"); return; }
-   if(FileSize(h) == 0) FileWrite(h, "timestamp", "scan_id", "risk_score", "bias", "articles", "avg_sent_pct", "bid", "h1_atr");
+   Print("DEBUG: LogScore() called. lastScanId=", lastScanId, " CurrentRiskScore=", CurrentRiskScore);
+   int h = FileOpen("score_log.csv", FILE_WRITE | FILE_CSV, ','); 
+   if(h == INVALID_HANDLE) { 
+      Print("CRITICAL: score_log.csv open failed. GetLastError() = ", GetLastError()); 
+      return; 
+   }
+   if(FileSize(h) == 0) {
+      FileWrite(h, "timestamp", "scan_id", "risk_score", "bias", "articles", "avg_sent_pct", "bid", "h1_atr");
+   }
    FileSeek(h, 0, SEEK_END);
    FileWrite(h, TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), lastScanId, IntegerToString(CurrentRiskScore), scanBias,
              IntegerToString(scanArticles), DoubleToString(scanAvgSent, 0),
              DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits), DoubleToString(GetATR(), 1));
    FileClose(h);
-   Print("SCORE LOGGED: ", CurrentRiskScore, " ", scanBias, " n=", scanArticles);
+   Print("SCORE LOGGED SUCCESSFULLY: ", CurrentRiskScore, " ", scanBias, " n=", scanArticles);
 }
 
 void OnTimer() {
