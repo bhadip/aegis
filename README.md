@@ -44,3 +44,6 @@ cd ~/aegis
 docker compose up -d --build
 # MT5: compile AEGIS_Captain.mq5 (F7), attach to .ND H1 chart, enable Algo Trading
 ```
+
+## Known Issues
+- **Scan Analytics**: Currently under active troubleshooting. Data pipeline from MT5 to Bridge analytics is being investigated.
