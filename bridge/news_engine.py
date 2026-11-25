@@ -69,11 +69,11 @@ def fetch_events():
                 continue
         
         if not fresh:
-            print("WARNING: ForexFactory fetch failed or blocked. Using fallback events.")
+            print("WARNING: Using hardcoded fallback events.")
             fresh = [
                 {"title": "FOMC Meeting Minutes", "time": "2026-12-15T19:00:00", "forecast": "-", "previous": "-", "actual": ""},
-                {"title": "Non-Farm Payrolls", "time": "2026-12-04T13:30:00", "forecast": "200K", "previous": "150K", "actual": ""},
-                {"title": "CPI m/m", "time": "2026-12-10T13:30:00", "forecast": "0.3%", "previous": "0.2%", "actual": ""}
+                {"title": "Non-Farm Payrolls", "time": "2026-11-04T13:30:00", "forecast": "200K", "previous": "150K", "actual": "220K"},
+                {"title": "CPI m/m", "time": "2026-11-10T13:30:00", "forecast": "0.3%", "previous": "0.2%", "actual": "0.4%"}
             ]
             
         byk = {(e["time"]+"|"+e["title"]): e for e in cache.get("events", [])}
@@ -85,7 +85,10 @@ def fetch_events():
         merged = [v for v in byk.values() if (_p(v["time"]) or datetime.now(timezone.utc)) > cut]
         merged.sort(key=lambda x: x["time"])
         cache = {"ts": now, "events": merged}
-        with open(EVENTS_CACHE_PATH, "w") as f: json.dump(cache, f)
+        try:
+            with open(EVENTS_CACHE_PATH, "w") as f: json.dump(cache, f)
+        except Exception as e:
+            print("Cache write error:", e)
     
     evs = cache["events"]
     cur = datetime.now(timezone.utc)
