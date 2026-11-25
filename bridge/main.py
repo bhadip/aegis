@@ -1,3 +1,4 @@
+import news_engine
 import os
 import json
 import time
@@ -130,11 +131,9 @@ async def run_scan_logic():
         async with httpx.AsyncClient() as client:
             trigger_resp = await client.get("http://aegis-news:8000/api/v1/news/scan", timeout=45.0)
             trigger_resp.raise_for_status()
-
             status_resp = await client.get("http://aegis-news:8000/api/v1/news/status", timeout=15.0)
             status_resp.raise_for_status()
             data = status_resp.json()
-
             articles = []
             agent_risk = "N/A"
             agent_bias = "N/A"
@@ -180,6 +179,11 @@ async def run_scan_logic():
                 ea_config["SCAN_BIAS"] = str(agent_bias)
                 print("SCAN audit: no scored articles, used agent values:", agent_risk, agent_bias)
             ea_config["SCAN_ID"] = str(int(time.time()))
+            profile_name = news_engine.load_config().get("active_profile", "ND100")
+            import hashlib as _h, json as _j
+            _hh = _h.md5(_j.dumps(sorted([str(x.get("source_url") or x.get("headline")) for x in deduped])).encode()).hexdigest()
+            news_engine.record_stale(profile_name, _hh)
+            _st = news_engine.get_stale(profile_name)
             from email.utils import parsedate_to_datetime
             import datetime as _dtm
             def _sort_key(item):
@@ -197,22 +201,25 @@ async def run_scan_logic():
             last_scan_result = {
                 "risk_score": risk_score,
                 "bias": (bias + " Bias") if (bias != "N/A" and not str(bias).endswith("Bias")) else bias,
-                "sources": sources_list
+                "sources": sources_list,
+                "profile": profile_name
             }
             last_scan_time = datetime.now(timezone.utc).isoformat()
-
             if risk_score != "N/A":
                 ea_config["RISK_SCORE"] = str(risk_score)
-
             heads = [str(a.get('headline', a.get('title', 'N/A'))) for a in sources_list[:10]]
-            def build_msg(hl):
+            def build_msg(hl, profile="ND100"):
                 body = "\n".join([f"- {h}" for h in hl])
-                return f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
-            msg = build_msg(heads)
+                return f"📰 *News Scan Completed ({profile})*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
+            msg = build_msg(heads, profile_name)
             while len(msg) > 4000 and heads:
                 heads.pop()
-                msg = build_msg(heads)
-            send_telegram(msg)
+                msg = build_msg(heads, profile_name)
+            if _st.get("stale"):
+                _hrs = _st.get("hours", 0)
+                send_telegram(f"⚠️ Scan unchanged for {_hrs}h ({profile_name}) - Risk {risk_score}/100 {bias}")
+            else:
+                send_telegram(msg)
     except Exception as e:
         last_scan_result = {"error": str(e)}
         last_scan_time = datetime.now(timezone.utc).isoformat()
@@ -287,7 +294,7 @@ def get_status():
             "ea_config": ea_config}
 
 @app.get("/api/v1/ea/status")
-def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: float = 0.0, active_positions: int = 0,
+def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: float = 0.0, active_positions: int = 0, acct: str = "",
                      ath: float = 0.0, atl: float = 0.0, threshold: float = 0.0, trade_allowed: int = 1,
                      restriction_reason: str = "None", grid_eff: float = 0.0, atr: float = 0.0,
                      g_h1: float = 0.0, g_h1min: float = 0.0, g_athpct: float = 0.0,
@@ -299,7 +306,7 @@ def update_ea_status(equity: float = 0.0, balance: float = 0.0, margin_level: fl
     if margin_level > 2000: new_status = "Very Safe"
     elif margin_level > 1000: new_status = "Safe"
     elif margin_level > 0: new_status = "Warning"
-    account_status = {"equity": equity, "balance": balance, "margin_level": margin_level, "active_positions": active_positions, "status": new_status}
+    account_status = {"equity": equity, "balance": balance, "margin_level": margin_level, "active_positions": active_positions, "account": acct, "status": new_status}
     ea_metrics = {"ath": ath, "atl": atl, "threshold": threshold, "trade_allowed": bool(trade_allowed), "restriction_reason": restriction_reason, "grid_eff": grid_eff, "atr": atr,
                   "g_h1": g_h1, "g_h1min": g_h1min, "g_athpct": g_athpct, "g_lots": g_lots,
                   "g_lotmax": g_lotmax, "g_dist": g_dist, "g_need": g_need, "g_hook": g_hook,
@@ -343,14 +350,30 @@ async def trigger_scan(user: dict = Depends(require_auth)):
     asyncio.create_task(run_scan_logic())
     return {"status": "scan_started"}
 
+app.include_router(news_engine.router_events)
+app.include_router(news_engine.router_admin)
+try:
+    news_engine.start_engine()
+except Exception as e:
+    print("engine start failed:", e)
+
+@app.post("/api/v1/internal/scan/{profile}")
+async def internal_scan(profile: str, request: Request):
+    cfg = news_engine.load_config(); cfg["active_profile"]=profile; news_engine.save_config(cfg)
+    if scan_in_progress: return {"status":"already_running"}
+    asyncio.create_task(run_scan_logic()); return {"status":"scan_started"}
+
 @app.get("/api/v1/news/config")
 async def get_news_config():
-    return {
-        "default_keywords": ["Fed", "ECB", "inflation", "CPI", "NFP", "unemployment", "GDP", "interest rate", "tariff", "trade war", "war", "conflict", "sanctions", "oil", "energy"],
-        "active_keywords": ["Fed", "ECB", "inflation", "CPI", "NFP", "unemployment", "GDP", "interest rate", "tariff", "trade war"],
-        "default_rss_feeds": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://rss.cnn.com/rss/money_latest.rss", "https://www.reutersagency.com/feed/", "https://www.cnbc.com/id/100003114/device/rss/rss.html"],
-        "active_rss_feeds": ["https://feeds.bbci.co.uk/news/business/rss.xml", "https://rss.cnn.com/rss/money_latest.rss"]
-    }
+    return news_engine.profile_payload()
+
+@app.post("/api/v1/news/config")
+async def save_news_config(data: dict, user: dict = Depends(require_auth)):
+    return news_engine.save_profile_payload(data, user.get("role","viewer"))
+
+@app.post("/api/v1/news/profile")
+async def switch_profile(data: dict, user: dict = Depends(require_auth)):
+    return news_engine.api_switch_profile(data)
 
 @app.api_route("/api/v1/tools/export", methods=["GET", "POST"])
 def trigger_export(user: dict = Depends(require_auth), days: int = 30, price: str = "BID"):

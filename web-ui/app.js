@@ -1,6 +1,9 @@
 window.app = new Vue({
     el: '#app',
     data: {
+        newKeyword: '',
+        newFeed: '',
+        eventsData: null,
         currentUser: null,
         allUsers: [],
         newUserEmail: "",
@@ -9,7 +12,7 @@ window.app = new Vue({
         currentTab: 'dashboard',
         isMobileMenuOpen: false,
         isMobileMenuOpen: false,
-        accountStatus: { equity: 0, balance: 0, margin_level: 0, status: 'Disconnected' },
+        accountStatus: { equity: 0, balance: 0, margin_level: 0, status: 'Disconnected', account: '-' },
         eaMetrics: { ath: 0, atl: 0, threshold: 0, trade_allowed: true, restriction_reason: 'None' },
         isTradingPaused: false,
         exportPeriod: 30,
@@ -23,7 +26,7 @@ window.app = new Vue({
         analyticsWindow: '7d',
         settingsDirty: false,
         scanResult: null,
-        newsConfig: { active_keywords: [], default_keywords: [], active_rss_feeds: [], default_rss_feeds: [] },
+        newsConfig: { active_keywords: [], default_keywords: [], active_rss_feeds: [], default_rss_feeds: [], custom_keywords: [], custom_feeds: [], auto_keywords: [], profiles: [], active_profile: 'ND100', global: {}, stale: null, schedule_hours: 4 },
         eaConfig: { base_lot_size: 0.01, grid_distance: 100.0, equity_multiplier: 2500, enable_basket_close: false, ath_threshold: 0.15, scan_interval_hours: 4, grid_min: 50, grid_max: 300, grid_step_pct: 25, tp_min: 10, tp_max: 100, tp_t1_mult: 0.6, tp_tier_step: 0.2, tp_tier_max: 1.4 }
     },
     computed: {
@@ -78,12 +81,32 @@ window.app = new Vue({
             }
             return rows;
         },
+        inactive_keywords() {
+            const defaults = this.newsConfig.default_keywords || [];
+            const active = this.newsConfig.active_keywords || [];
+            return defaults.filter(k => !active.includes(k)).sort();
+        },
+        inactive_rss_feeds() {
+            const defaults = this.newsConfig.default_rss_feeds || [];
+            const active = this.newsConfig.active_rss_feeds || [];
+            return defaults.filter(u => !active.includes(u)).sort();
+        },
         checkedKeywords() { 
             const defaults = this.newsConfig.default_keywords || [];
             const active = this.newsConfig.active_keywords || [];
             return defaults.filter(k => active.includes(k)).sort(); 
         },
-        uncheckedKeywords() { 
+        uninactive_keywords() {
+            const defaults = this.newsConfig.default_keywords || [];
+            const active = this.newsConfig.active_keywords || [];
+            return defaults.filter(k => !active.includes(k)).sort();
+        },
+        inactive_rss_feeds() {
+            const defaults = this.newsConfig.default_rss_feeds || [];
+            const active = this.newsConfig.active_rss_feeds || [];
+            return defaults.filter(u => !active.includes(u)).sort();
+        },
+        checkedKeywords() { 
             const defaults = this.newsConfig.default_keywords || [];
             const active = this.newsConfig.active_keywords || [];
             return defaults.filter(k => !active.includes(k)).sort(); 
@@ -100,6 +123,17 @@ window.app = new Vue({
         }
     },
     methods: {
+    async fetchEventsAegis() { try { const r = await axios.get('/api/v1/events'); this.eventsData = r.data; this.$set(this.newsConfig,'events',r.data); } catch(e){} },
+    async switchProfile() { try { await axios.post('/api/v1/news/profile', {active_profile:this.newsConfig.active_profile}); } catch(e){} await this.fetchNewsConfig();
+     this.fetchEventsAegis();
+     setInterval(this.fetchEventsAegis, 60000);
+     this.fetchEventsAegis();
+     setInterval(this.fetchEventsAegis, 60000);
+     this.fetchEventsAegis();
+     setInterval(this.fetchEventsAegis, 60000); await this.fetchEventsAegis(); },
+    async saveNewsConfig() { this.newsConfig.custom_keywords=(this.newsConfig.custom_keywords||[]).filter(k=>this.newsConfig.active_keywords.includes(k)); this.newsConfig.custom_feeds=(this.newsConfig.custom_feeds||[]).filter(u=>this.newsConfig.active_rss_feeds.includes(u)); try { await axios.post('/api/v1/news/config', this.newsConfig); } catch(e){} await this.fetchNewsConfig(); },
+    addKeyword(){ const kw=this.newKeyword; if(kw&&this.currentUser&&this.currentUser.role==='admin'){ if(!this.newsConfig.custom_keywords.includes(kw))this.newsConfig.custom_keywords.push(kw); if(!this.newsConfig.active_keywords.includes(kw))this.newsConfig.active_keywords.push(kw); this.newKeyword=''; this.saveNewsConfig(); } },
+    addFeed(){ const u=this.newFeed; if(u&&this.currentUser&&this.currentUser.role==='admin'){ if(!this.newsConfig.custom_feeds.includes(u))this.newsConfig.custom_feeds.push(u); if(!this.newsConfig.active_rss_feeds.includes(u))this.newsConfig.active_rss_feeds.push(u); this.newFeed=''; this.saveNewsConfig(); } },
         async checkAuth() {
             try {
                 const res = await axios.get('/api/v1/auth/me');
@@ -272,7 +306,14 @@ window.app = new Vue({
         async fetchNewsConfig() {
             try {
                 const res = await axios.get('/api/v1/news/config');
-                this.newsConfig = res.data;
+                const _ev=this.newsConfig.events; this.newsConfig = res.data; if(_ev) this.newsConfig.events=_ev; if(!this.newsConfig.profiles) this.newsConfig.profiles=['ND100','XAUUSD']; if(!this.newsConfig.active_profile) this.newsConfig.active_profile='ND100'; if(!this.newsConfig.global) this.newsConfig.global={}; if(!this.newsConfig.custom_keywords) this.newsConfig.custom_keywords=[]; if(!this.newsConfig.custom_feeds) this.newsConfig.custom_feeds=[]; if(!this.newsConfig.active_keywords) this.newsConfig.active_keywords=[]; if(!this.newsConfig.active_rss_feeds) this.newsConfig.active_rss_feeds=[];
+             if(!this.newsConfig.profiles) this.newsConfig.profiles=[];
+             if(!this.newsConfig.active_profile) this.newsConfig.active_profile='ND100';
+             if(!this.newsConfig.global) this.newsConfig.global={};
+             if(!this.newsConfig.custom_keywords) this.newsConfig.custom_keywords=[];
+             if(!this.newsConfig.custom_feeds) this.newsConfig.custom_feeds=[];
+             if(!this.newsConfig.active_keywords) this.newsConfig.active_keywords=[];
+             if(!this.newsConfig.active_rss_feeds) this.newsConfig.active_rss_feeds=[];
                 // Ensure defaults exist for the "Inactive" list to render
                 if (!this.newsConfig.default_keywords) this.newsConfig.default_keywords = this.newsConfig.active_keywords || [];
                 if (!this.newsConfig.default_rss_feeds) this.newsConfig.default_rss_feeds = this.newsConfig.active_rss_feeds || [];

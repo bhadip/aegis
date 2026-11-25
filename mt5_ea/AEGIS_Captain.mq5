@@ -2,7 +2,7 @@
 //|                                      AEGIS_Captain.mq5           |
 //+------------------------------------------------------------------+
 #property copyright "ExaGuard AI"
-#property version "0.11.1"
+#property version "0.11.4"
 #property strict
 
 // LONG (SELL) POSITIONS ARE STRICTLY PROHIBITED. ONLY MARKET BUY IS ALLOWED.
@@ -92,7 +92,7 @@ int OnInit() {
       if(rsiHandles[i] == INVALID_HANDLE || atrHandles[i] == INVALID_HANDLE) { Print("Failed handle ", tfNames[i]); return INIT_FAILED; }
    }
    atrH1Handle = atrHandles[4];
-   Print("AEGIS Captain EA Initialized - Version 0.11.1");
+   Print("AEGIS Captain EA Initialized - Version 0.11.4");
    return INIT_SUCCEEDED;
 }
 
@@ -172,15 +172,25 @@ void DoExport() {
 
 void LogScore() {
    Print("DEBUG: LogScore() called. lastScanId=", lastScanId, " CurrentRiskScore=", CurrentRiskScore);
-   int h = FileOpen("score_log.csv", FILE_WRITE | FILE_CSV, ','); 
+   
+   // FILE_ANSI forces UTF-8/ASCII so Python can read it. 
+   // We check if file exists to safely use FILE_READ for appending.
+   int flags = FILE_WRITE | FILE_CSV | FILE_ANSI;
+   bool isNew = !FileIsExist("score_log.csv");
+   if(!isNew) flags |= FILE_READ;
+   
+   int h = FileOpen("score_log.csv", flags, ',');
    if(h == INVALID_HANDLE) { 
       Print("CRITICAL: score_log.csv open failed. GetLastError() = ", GetLastError()); 
       return; 
    }
-   if(FileSize(h) == 0) {
+   
+   if(isNew || FileSize(h) == 0) {
       FileWrite(h, "timestamp", "scan_id", "risk_score", "bias", "articles", "avg_sent_pct", "bid", "h1_atr");
+   } else {
+      FileSeek(h, 0, SEEK_END);
    }
-   FileSeek(h, 0, SEEK_END);
+   
    FileWrite(h, TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), lastScanId, IntegerToString(CurrentRiskScore), scanBias,
              IntegerToString(scanArticles), DoubleToString(scanAvgSent, 0),
              DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_BID), _Digits), DoubleToString(GetATR(), 1));
@@ -280,7 +290,7 @@ void OnTimer() {
       if(tf2 == "") restriction_reason = "Waiting for Initial RSI Hook (<40 & turning up)";
    }
 
-   string statusUrl = serverURL + "/api/v1/ea/status?equity=" + DoubleToString(equity, 2) +
+   string statusUrl = serverURL + "/api/v1/ea/status?acct=" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + "&equity=" + DoubleToString(equity, 2) +
                       "&balance=" + DoubleToString(balance, 2) +
                       "&margin_level=" + DoubleToString(margin_level, 2) +
                       "&active_positions=" + IntegerToString(active_positions) +

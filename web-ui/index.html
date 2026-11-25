@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ExaGuard AEGIS</title>
+    <title><img src="/static/logo.png" class="w-7 h-7 inline mr-2 rounded">ExaGuard AEGIS</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<link rel="icon" href="/static/favicon.ico">
 </head>
 <body class="bg-gray-900 text-white font-sans">
     <div id="app" class="flex h-screen overflow-hidden">
@@ -26,254 +27,130 @@
             </div>
             <nav class="flex-1 p-4 space-y-2">
                 <button @click="currentTab = 'dashboard'; isMobileMenuOpen = false" :class="currentTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Dashboard</button>
-                <button @click="currentTab = 'news'; isMobileMenuOpen = false" :class="currentTab === 'news' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">News Intelligence</button>
-                <button @click="currentTab = 'settings'; isMobileMenuOpen = false" :class="currentTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Settings</button>
-            <button @click="currentTab = 'analytics'; isMobileMenuOpen = false" :class="currentTab === 'analytics' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Analytics</button>
-                <button v-if="currentUser && currentUser.role === 'admin'" @click="currentTab = 'users'; isMobileMenuOpen = false; fetchUsers()" :class="currentTab === 'users' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">User Management</button>
-            </nav>
-                        <div class="p-4 border-t border-gray-700">
-                <div v-if="currentUser" class="flex flex-col gap-2 mb-3">
-                    <span class="text-gray-300 text-sm">{{ currentUser.email }} <span class="text-xs text-blue-400">({{ currentUser.role }})</span></span>
-                    <button id="logout-btn" @click="logout" class="bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-xs text-white transition w-full">Logout</button>
-                </div>
-            </div>
-                        <div class="p-4 border-t border-gray-700 text-xs text-gray-500">Version: {{ version }}</div>
-        </aside>
-
-        <main class="flex-1 overflow-y-auto p-6 md:p-8 relative">
-            <!-- Mobile Header -->
-            <div class="md:hidden flex items-center justify-between mb-6">
-                <button @click="isMobileMenuOpen = true" class="text-gray-400 hover:text-white p-2 -ml-2">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
-                </button>
-                <span class="text-lg font-bold text-blue-400">AEGIS</span>
-                <div class="w-8"></div> <!-- Spacer for centering -->
-            </div>
-            <div v-if="currentTab === 'dashboard'">
-                <h2 class="text-2xl font-bold mb-6">Account Status</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">Equity</p>
-                        <p class="text-2xl font-bold text-green-400">${{ formatNumber(accountStatus.equity) }}</p>
-                    </div>
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">Balance</p>
-                        <p class="text-2xl font-bold text-blue-400">${{ formatNumber(accountStatus.balance) }}</p>
-                    </div>
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">Margin Level</p>
-                        <p class="text-2xl font-bold text-red-400">{{ formatNumber(accountStatus.margin_level, 0) }}%</p>
-                    </div>
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 flex justify-between items-center">
-                        <div>
-                            <p class="text-sm text-gray-400">Status</p>
-                            <p class="text-2xl font-bold" :class="accountStatus.status === 'Disconnected' ? 'text-gray-400' : 'text-green-400'">{{ accountStatus.status }}</p>
-                        </div>
-                        <button @click="togglePause" :class="isTradingPaused ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'" class="px-3 py-1 rounded text-sm font-medium">
-                            {{ isTradingPaused ? '▶ Resume' : '⏸ Pause' }}
-                        </button>
-                    </div>
-                </div>
-
-                <h2 class="text-2xl font-bold mb-6">System Metrics</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">Algo Trading Status</p>
-                        <div class="flex items-center gap-2 mt-1">
-                            <span :class="eaMetrics.trade_allowed ? 'bg-green-500' : 'bg-red-500'" class="w-3 h-3 rounded-full animate-pulse"></span>
-                            <p class="text-xl font-bold" :class="eaMetrics.trade_allowed ? 'text-green-400' : 'text-red-400'">
-                                {{ eaMetrics.trade_allowed ? 'ENABLED' : 'DISABLED' }}
-                            </p>
-                        </div>
-                        <p v-if="eaMetrics.restriction_reason && eaMetrics.restriction_reason !== 'None'" class="text-xs text-yellow-300 mt-2 font-medium bg-yellow-900/20 p-2 rounded border border-yellow-700/50">
-                            ⏳ {{ eaMetrics.restriction_reason }}
-                        </p>
-                        <p v-else class="text-xs text-green-300 mt-2">
-                            ✅ Ready to trade.
-                        </p>
-                    </div>
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">4-Week ATH</p>
-                        <p class="text-xl font-bold">{{ formatNumber(eaMetrics.ath) }}</p>
-                        <p class="text-xs text-gray-500 mt-1">Reached {{ fmtDate(eaMetrics.ath_t) }}</p>
-                    </div>
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">4-Week ATL</p>
-                        <p class="text-xl font-bold">{{ formatNumber(eaMetrics.atl) }}</p>
-                        <p class="text-xs text-gray-500 mt-1">Reached {{ fmtDate(eaMetrics.atl_t) }}</p>
-                    </div>
-                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
-                        <p class="text-sm text-gray-400">Pause Threshold (Top 15%)</p>
-                        <p class="text-xl font-bold text-yellow-400">{{ formatNumber(eaMetrics.threshold) }}</p>
-                        <p class="text-xs text-gray-500 mt-1">= ATL + Range x 85% (Range {{ formatNumber(eaMetrics.ath - eaMetrics.atl) }})</p>
-                    </div>
-                </div>
-
-                                <h2 class="text-2xl font-bold mb-4">Rule Compliance</h2>
-                <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-6">
-                    <div v-for="g in gates" :key="g.label" class="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-full px-3 py-1.5">
-                        <span :class="g.state === 'ok' ? 'bg-green-500' : (g.state === 'wait' ? 'bg-amber-400' : 'bg-red-500')" class="w-2.5 h-2.5 rounded-full"></span>
-                        <span class="text-xs text-gray-300">{{ g.label }}: <span :class="g.state === 'ok' ? 'text-green-400' : (g.state === 'wait' ? 'text-amber-300' : 'text-red-400')">{{ g.text }}</span></span>
-                    </div>
-                </div>
-                <h2 class="text-2xl font-bold mb-4">Open Positions</h2>
-                <div class="hidden sm:block overflow-x-auto mb-2">
-                    <table class="w-full text-sm">
-                        <thead><tr class="text-gray-400 text-left"><th class="py-1 pr-4">Entry</th><th class="pr-4">Tier</th><th class="pr-4">TP</th><th class="pr-4">To-TP (pts)</th><th class="text-right">Floating (pts)</th></tr></thead>
-                        <tbody>
-                            <tr v-for="p in positions" :key="p.tier" class="border-t border-gray-700/60">
-                                <td class="py-1.5 pr-4">{{ fmt(p.entry,2) }}</td>
-                                <td class="pr-4">T{{ p.tier }}</td>
-                                <td class="pr-4">{{ fmt(p.tp,2) }}</td>
-                                <td class="pr-4 text-gray-300">{{ fmt(p.toTp,1) }}</td>
-                                <td class="text-right font-medium" :class="p.floating >= 0 ? 'text-green-400' : 'text-red-400'">{{ (p.floating >= 0 ? '+' : '') + fmt(p.floating,1) }}</td>
-                            </tr>
-                            <tr v-if="positions.length === 0"><td colspan="5" class="py-2 text-gray-500">No open positions.</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="sm:hidden space-y-2 mb-2">
-                    <div v-for="p in positions" :key="'m'+p.tier" class="bg-gray-800 border border-gray-700 rounded p-3 flex justify-between items-center">
-                        <span class="text-xs text-gray-300">T{{ p.tier }} {{ fmt(p.entry,2) }} &rarr; TP {{ fmt(p.tp,2) }}</span>
-                        <span class="text-sm font-medium" :class="p.floating >= 0 ? 'text-green-400' : 'text-red-400'">{{ (p.floating >= 0 ? '+' : '') + fmt(p.floating,1) }}</span>
-                    </div>
-                    <p v-if="positions.length === 0" class="text-xs text-gray-500">No open positions.</p>
-                </div>
-                <a :href="eaMetrics.ea_url || 'https://ea-aegis.prasanti.com'" target="_blank" rel="noopener" class="inline-block bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded text-sm font-medium mb-3">🖥 Open MT5 Terminal (VNC)</a>
-                <p class="text-sm mb-6"><span class="text-blue-400 font-medium">Last Action:</span> <span class="text-gray-300">{{ eaMetrics.last_action || '—' }}</span></p>
-                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
-                    <p class="text-sm text-gray-400 mb-2">Active EA Parameters (live from Bridge)</p>
-                    <p class="text-xs text-gray-300">Lot {{ liveConfig.base_lot_size }} | Grid {{ liveConfig.grid_distance }} pts | EqMult {{ liveConfig.equity_multiplier }} | TP: ATR-tiered | GridEff {{ eaMetrics.grid_eff }} pts | ATR {{ eaMetrics.atr }} | Basket {{ liveConfig.enable_basket_close ? 'ON' : 'OFF' }} | Risk Score {{ liveConfig.risk_score }}</p>
-                </div>
-                <h2 class="text-2xl font-bold mb-6">Data & Analytics</h2>
-                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 max-w-2xl">
-                    <p class="text-sm text-gray-400 mb-4">Export historical OHLCV + TA indicator data from MT5 for analysis.</p>
-                    <div class="flex flex-col sm:flex-row gap-4 items-end">
-                        <div class="flex-1 w-full">
-                            <label class="block text-sm font-medium text-gray-400 mb-1">Lookback Period (Days)</label>
-                            <select v-model="exportPeriod" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
-                                <option :value="7">1 Week</option>
-                                <option :value="30">1 Month</option>
-                                <option :value="90">3 Months</option>
-                            </select>
-                        </div>
-                        <div class="flex-1 w-full">
-                            <label class="block text-sm font-medium text-gray-400 mb-1">Price Basis</label>
-                            <select v-model="exportPrice" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
-                                <option value="BID">BID (exact history)</option>
-                                <option value="ASK">ASK (bid + current spread)</option>
-                            </select>
-                        </div>
-                        <button @click="triggerExport" :disabled="isExporting" class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-medium">
-                            {{ isExporting ? 'Exporting...' : 'Export Data' }}
-                        </button>
-                        <button @click="downloadCSV" :disabled="!exportReady" class="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-medium">
-                            {{ exportReady ? '⬇️ Download CSV' : 'Waiting...' }}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="currentTab === 'news'">
-                <h2 class="text-2xl font-bold mb-6">News Intelligence</h2>
+                <button @click="currentTab = 'news'; isMobileMenuOpen = false" :class="currentTab === 'news' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">News Intelligence
                 <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 mb-6">
-                    <h3 class="text-lg font-bold mb-4">Scan Controls</h3>
-                    <div class="flex flex-col sm:flex-row gap-4 items-end mb-6">
-                        <div class="flex-1 w-full">
-                            <label class="block text-sm font-medium text-gray-400 mb-1">Scan Schedule (Hours)</label>
-                            <select v-model.number="eaConfig.scan_interval_hours" @change="saveConfig" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
-                                <option :value="1">Every 1 Hour</option>
-                                <option :value="4">Every 4 Hours</option>
-                                <option :value="8">Every 8 Hours</option>
-                                <option :value="24">Daily</option>
-                            </select>
-                        </div>
-                        <button @click="triggerScan" :disabled="isScanning" class="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-medium w-full sm:w-auto">
-                            {{ isScanning ? 'Scanning...' : '⚡ Run Scan Now' }}
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Latest Scan Result Display -->
-                <div v-if="scanResult" class="bg-gray-800 p-6 rounded-lg border border-gray-700 mb-6">
-                    <h3 class="text-lg font-bold mb-4">Latest Scan Result</h3>
-                    <div v-if="scanResult.error" class="text-red-400">{{ scanResult.error }}</div>
-                    <div v-else>
-                        <div class="grid grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <div class="flex items-center gap-2 mb-1">
-                                    <p class="text-sm text-gray-400">Risk Score</p>
-                                    <span class="text-xs text-gray-500 cursor-help" title="0-100 scale: Lower scores (<40) indicate bullish/low-risk conditions. Higher scores (>70) indicate bearish/high-risk conditions.">ⓘ</span>
+                    <h3 class="text-lg font-bold mb-4">Economic Events <span class="text-xs text-gray-500">(High Impact USD)</span></h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <h4 class="text-sm font-semibold text-blue-400 mb-2">NEXT Events</h4>
+                            <div v-if="eventsData && eventsData.next_events && eventsData.next_events.length">
+                                <div v-for="e in eventsData.next_events.slice(0,3)" class="text-xs mb-2 p-2 bg-gray-900 rounded">
+                                    <div class="font-bold text-blue-300">{{ e.title }}</div>
+                                    <div class="text-gray-400">Time: {{ e.time_sgt }} SGT</div>
+                                    <div class="text-gray-400">Forecast: {{ e.forecast || '-' }} | Previous: {{ e.previous || '-' }}</div>
                                 </div>
-                                <p class="text-2xl font-bold text-blue-400">{{ scanResult.risk_score || 'N/A' }}<span class="text-sm text-gray-500 font-normal">/100</span></p>
                             </div>
-                            <div>
-                                <p class="text-sm text-gray-400">Bias</p>
-                                <p class="text-2xl font-bold text-purple-400">{{ scanResult.bias || 'N/A' }}</p>
-                            </div>
+                            <div v-else class="text-xs text-gray-500">No upcoming events.</div>
                         </div>
                         <div>
-                            <p class="text-sm text-gray-400 mb-2">Verified Sources (full list):</p>
-                            <div class="space-y-3 max-h-96 overflow-y-auto pr-2">
-                                <div v-for="(source, idx) in (scanResult.sources || [])" :key="idx" class="bg-gray-900/60 border border-gray-700 rounded p-3">
-                                    <p class="text-sm text-gray-200">{{ getHeadline(source) }}</p>
-                                    <p class="text-xs text-gray-500 mt-1">{{ source.publisher || 'Unknown publisher' }} &middot; {{ source.publish_timestamp || '' }}</p>
-                                    <p class="text-xs mt-1"><span class="text-gray-400">Keywords:</span> <span class="text-blue-300">{{ (source.matched_keywords || []).join(', ') || 'none' }}</span> <span class="text-gray-400">Sentiment:</span> <span :class="(source.individual_sentiment_score || 0) > 0 ? 'text-green-400' : ((source.individual_sentiment_score || 0) < 0 ? 'text-red-400' : 'text-gray-400')">{{ Math.round((source.individual_sentiment_score || 0) * 100) }}%</span></p>
-                                    <a :href="source.source_url" target="_blank" class="text-xs text-blue-400 hover:underline break-all">{{ source.source_url }}</a>
+                            <h4 class="text-sm font-semibold text-red-400 mb-2">PAST Events</h4>
+                            <div v-if="eventsData && eventsData.past_events && eventsData.past_events.length">
+                                <div v-for="e in eventsData.past_events.slice(-3).reverse()" class="text-xs mb-2 p-2 bg-gray-900 rounded">
+                                    <div class="font-bold text-red-300">{{ e.title }}</div>
+                                    <div class="text-gray-400">Time: {{ e.time_sgt }} SGT</div>
+                                    <div class="text-gray-400">Actual: {{ e.actual || '-' }} | Forecast: {{ e.forecast || '-' }} | Previous: {{ e.previous || '-' }}</div>
                                 </div>
-                                <p v-if="!scanResult.sources || scanResult.sources.length === 0" class="text-sm text-gray-500">No sources available.</p>
                             </div>
+                            <div v-else class="text-xs text-gray-500">There is no event in the last 24 hours.</div>
                         </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3" v-if="currentUser && currentUser.role === 'admin'">
+                        <div><label class="text-xs text-gray-400">Telegram alert A (mins before)</label><input type="number" v-model.number="newsConfig.global.event_telegram_alert_mins" @change="saveNewsConfig" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                        <div><label class="text-xs text-gray-400">Dashboard past window B (mins)</label><input type="number" v-model.number="newsConfig.global.event_dashboard_past_mins" @change="saveNewsConfig" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
                     </div>
                 </div>
 
                 <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 mb-6">
-                    <h3 class="text-lg font-bold mb-4">Keywords</h3>
-                    <div class="mb-4">
-                        <p class="text-xs text-gray-500 mb-2">Active (checked):</p>
-                        <div class="flex flex-wrap gap-2">
-                            <label v-for="kw in checkedKeywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-blue-500 cursor-pointer">
-                                <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
-                                <span class="text-sm text-blue-400">{{ kw }}</span>
-                            </label>
-                        </div>
+                    <h3 class="text-lg font-bold mb-4">News Scan</h3>
+                    <div class="flex flex-wrap items-center gap-3 mb-6 p-3 bg-gray-900 rounded">
+                        <label class="text-sm text-gray-400">Profile:</label>
+                        <select v-model="newsConfig.active_profile" @change="switchProfile" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white">
+                            <option v-for="p in newsConfig.profiles" :value="p">{{ p }}</option>
+                        </select>
+                        <label class="text-sm text-gray-400 ml-4">Schedule:</label>
+                        <select v-model.number="newsConfig.schedule_hours" @change="saveNewsConfig" class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white">
+                            <option :value="0.5">Every 30 mins</option>
+                            <option :value="1">Every 1 hour</option>
+                            <option :value="2">Every 2 hours</option>
+                            <option :value="4">Every 4 hours</option>
+                            <option :value="8">Every 8 hours</option>
+                            <option :value="24">Daily</option>
+                        </select>
+                        <button @click="triggerScan" class="bg-blue-600 hover:bg-blue-700 px-4 py-1 rounded text-sm ml-auto">⚡ Run Scan Now</button>
                     </div>
-                    <div>
-                        <p class="text-xs text-gray-500 mb-2">Inactive (unchecked):</p>
-                        <div class="flex flex-wrap gap-2">
-                            <label v-for="kw in uncheckedKeywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-gray-700 cursor-pointer">
-                                <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
-                                <span class="text-sm">{{ kw }}</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700">
-                    <h3 class="text-lg font-bold mb-4">RSS Feeds</h3>
-                    <div class="mb-4">
-                        <p class="text-xs text-gray-500 mb-2">Active Feeds:</p>
-                        <div class="space-y-2">
-                            <label v-for="url in checkedRssFeeds" class="flex items-start bg-gray-900 p-2 rounded border border-blue-500 cursor-pointer">
-                                <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
-                                <span class="text-xs break-all text-blue-400">{{ url }}</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 mb-2">Inactive Feeds:</p>
-                        <div class="space-y-2">
-                            <label v-for="url in uncheckedRssFeeds" class="flex items-start bg-gray-900 p-2 rounded border border-gray-700 cursor-pointer">
-                                <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
-                                <span class="text-xs break-all">{{ url }}</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            <div v-if="currentTab === 'settings'" @input="settingsDirty = true">
-                <h2 class="text-2xl font-bold mb-6">EA Configuration</h2>
+                    <div class="mb-6">
+                        <h4 class="text-md font-semibold mb-3">Keywords</h4>
+                        <div class="mb-3">
+                            <p class="text-xs text-gray-500 mb-2">Active (checked):</p>
+                            <div class="flex flex-wrap gap-2">
+                                <label v-for="kw in newsConfig.active_keywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-blue-500 cursor-pointer">
+                                    <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
+                                    <span class="text-sm text-blue-400">{{ kw }}</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <p class="text-xs text-gray-500 mb-2">Inactive (unchecked):</p>
+                            <div class="flex flex-wrap gap-2">
+                                <label v-for="kw in inactive_keywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-gray-700 cursor-pointer">
+                                    <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
+                                    <span class="text-sm">{{ kw }}</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div v-if="currentUser && currentUser.role === 'admin'">
+                            <p class="text-xs text-gray-500 mb-2">Custom Keywords (uncheck + Save to delete):</p>
+                            <div class="flex flex-wrap gap-2 mb-2">
+                                <label v-for="kw in newsConfig.custom_keywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-purple-500 cursor-pointer">
+                                    <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
+                                    <span class="text-sm text-purple-300">{{ kw }}</span>
+                                </label>
+                            </div>
+                            <div class="flex gap-2">
+                                <input v-model="newKeyword" placeholder="Add custom keyword..." class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm flex-1">
+                                <button @click="addKeyword" class="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-sm">Add</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h4 class="text-md font-semibold mb-3">RSS Feeds</h4>
+                        <div class="mb-3">
+                            <p class="text-xs text-gray-500 mb-2">Active Feeds (checked):</p>
+                            <div class="space-y-2">
+                                <label v-for="url in newsConfig.active_rss_feeds" class="flex items-start bg-gray-900 p-2 rounded border border-blue-500 cursor-pointer">
+                                    <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
+                                    <span class="text-xs break-all text-blue-400">{{ url }}</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <p class="text-xs text-gray-500 mb-2">Inactive Feeds (unchecked):</p>
+                            <div class="space-y-2">
+                                <label v-for="url in inactive_rss_feeds" class="flex items-start bg-gray-900 p-2 rounded border border-gray-700 cursor-pointer">
+                                    <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
+                                    <span class="text-xs break-all">{{ url }}</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div v-if="currentUser && currentUser.role === 'admin'">
+                            <p class="text-xs text-gray-500 mb-2">Custom Feeds (uncheck + Save to delete):</p>
+                            <div class="space-y-2 mb-2">
+                                <label v-for="url in newsConfig.custom_feeds" class="flex items-start bg-gray-900 p-2 rounded border border-purple-500 cursor-pointer">
+                                    <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
+                                    <span class="text-xs break-all text-purple-300">{{ url }}</span>
+                                </label>
+                            </div>
+                            <div class="flex gap-2">
+                                <input v-model="newFeed" placeholder="Add custom RSS feed URL..." class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm flex-1">
+                                <button @click="addFeed" class="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-sm">Add</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                EA Configuration</h2>
                 <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 max-w-2xl space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-400 mb-1">Base Lot Size</label>

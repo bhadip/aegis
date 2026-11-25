@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExaGuard AEGIS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <div id="app" class="flex h-screen overflow-hidden">
+        <!-- Mobile Overlay -->
+        <div v-if="isMobileMenuOpen" @click="isMobileMenuOpen = false" class="fixed inset-0 z-40 bg-black bg-opacity-50 md:hidden"></div>
+        
+        <!-- Responsive Sidebar -->
+        <aside :class="isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'" class="fixed inset-y-0 left-0 z-50 w-64 bg-gray-800 border-r border-gray-700 flex flex-col transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0">
+            <div class="p-6 border-b border-gray-700 flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl font-bold text-blue-400">ExaGuard AEGIS</h1>
+                    <p class="text-xs text-gray-400 mt-1">Autonomous Execution & Grid Intelligence</p>
+                </div>
+                <button @click="isMobileMenuOpen = false" class="md:hidden text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <nav class="flex-1 p-4 space-y-2">
+                <button @click="currentTab = 'dashboard'; isMobileMenuOpen = false" :class="currentTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Dashboard</button>
+                <button @click="currentTab = 'news'; isMobileMenuOpen = false" :class="currentTab === 'news' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">News Intelligence</button>
+                <button @click="currentTab = 'settings'; isMobileMenuOpen = false" :class="currentTab === 'settings' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Settings</button>
+            <button @click="currentTab = 'analytics'; isMobileMenuOpen = false" :class="currentTab === 'analytics' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">Analytics</button>
+                <button v-if="currentUser && currentUser.role === 'admin'" @click="currentTab = 'users'; isMobileMenuOpen = false; fetchUsers()" :class="currentTab === 'users' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-700'" class="w-full text-left px-4 py-3 rounded-lg font-medium transition">User Management</button>
+            </nav>
+                        <div class="p-4 border-t border-gray-700">
+                <div v-if="currentUser" class="flex flex-col gap-2 mb-3">
+                    <span class="text-gray-300 text-sm">{{ currentUser.email }} <span class="text-xs text-blue-400">({{ currentUser.role }})</span></span>
+                    <button id="logout-btn" @click="logout" class="bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-xs text-white transition w-full">Logout</button>
+                </div>
+            </div>
+                        <div class="p-4 border-t border-gray-700 text-xs text-gray-500">Version: {{ version }}</div>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto p-6 md:p-8 relative">
+            <!-- Mobile Header -->
+            <div class="md:hidden flex items-center justify-between mb-6">
+                <button @click="isMobileMenuOpen = true" class="text-gray-400 hover:text-white p-2 -ml-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+                <span class="text-lg font-bold text-blue-400">AEGIS</span>
+                <div class="w-8"></div> <!-- Spacer for centering -->
+            </div>
+            <div v-if="currentTab === 'dashboard'">
+                <h2 class="text-2xl font-bold mb-6">Account Status</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">Equity</p>
+                        <p class="text-2xl font-bold text-green-400">${{ formatNumber(accountStatus.equity) }}</p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">Balance</p>
+                        <p class="text-2xl font-bold text-blue-400">${{ formatNumber(accountStatus.balance) }}</p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">Margin Level</p>
+                        <p class="text-2xl font-bold text-red-400">{{ formatNumber(accountStatus.margin_level, 0) }}%</p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 flex justify-between items-center">
+                        <div>
+                            <p class="text-sm text-gray-400">Status</p>
+                            <p class="text-2xl font-bold" :class="accountStatus.status === 'Disconnected' ? 'text-gray-400' : 'text-green-400'">{{ accountStatus.status }}</p>
+                        </div>
+                        <button @click="togglePause" :class="isTradingPaused ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'" class="px-3 py-1 rounded text-sm font-medium">
+                            {{ isTradingPaused ? '▶ Resume' : '⏸ Pause' }}
+                        </button>
+                    </div>
+                </div>
+
+                <h2 class="text-2xl font-bold mb-6">System Metrics</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">Algo Trading Status</p>
+                        <div class="flex items-center gap-2 mt-1">
+                            <span :class="eaMetrics.trade_allowed ? 'bg-green-500' : 'bg-red-500'" class="w-3 h-3 rounded-full animate-pulse"></span>
+                            <p class="text-xl font-bold" :class="eaMetrics.trade_allowed ? 'text-green-400' : 'text-red-400'">
+                                {{ eaMetrics.trade_allowed ? 'ENABLED' : 'DISABLED' }}
+                            </p>
+                        </div>
+                        <p v-if="eaMetrics.restriction_reason && eaMetrics.restriction_reason !== 'None'" class="text-xs text-yellow-300 mt-2 font-medium bg-yellow-900/20 p-2 rounded border border-yellow-700/50">
+                            ⏳ {{ eaMetrics.restriction_reason }}
+                        </p>
+                        <p v-else class="text-xs text-green-300 mt-2">
+                            ✅ Ready to trade.
+                        </p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">4-Week ATH</p>
+                        <p class="text-xl font-bold">{{ formatNumber(eaMetrics.ath) }}</p>
+                        <p class="text-xs text-gray-500 mt-1">Reached {{ fmtDate(eaMetrics.ath_t) }}</p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">4-Week ATL</p>
+                        <p class="text-xl font-bold">{{ formatNumber(eaMetrics.atl) }}</p>
+                        <p class="text-xs text-gray-500 mt-1">Reached {{ fmtDate(eaMetrics.atl_t) }}</p>
+                    </div>
+                    <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                        <p class="text-sm text-gray-400">Pause Threshold (Top 15%)</p>
+                        <p class="text-xl font-bold text-yellow-400">{{ formatNumber(eaMetrics.threshold) }}</p>
+                        <p class="text-xs text-gray-500 mt-1">= ATL + Range x 85% (Range {{ formatNumber(eaMetrics.ath - eaMetrics.atl) }})</p>
+                    </div>
+                </div>
+
+                                <h2 class="text-2xl font-bold mb-4">Rule Compliance</h2>
+                <div class="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 mb-6">
+                    <div v-for="g in gates" :key="g.label" class="flex items-center gap-2 bg-gray-800 border border-gray-700 rounded-full px-3 py-1.5">
+                        <span :class="g.state === 'ok' ? 'bg-green-500' : (g.state === 'wait' ? 'bg-amber-400' : 'bg-red-500')" class="w-2.5 h-2.5 rounded-full"></span>
+                        <span class="text-xs text-gray-300">{{ g.label }}: <span :class="g.state === 'ok' ? 'text-green-400' : (g.state === 'wait' ? 'text-amber-300' : 'text-red-400')">{{ g.text }}</span></span>
+                    </div>
+                </div>
+                <h2 class="text-2xl font-bold mb-4">Open Positions</h2>
+                <div class="hidden sm:block overflow-x-auto mb-2">
+                    <table class="w-full text-sm">
+                        <thead><tr class="text-gray-400 text-left"><th class="py-1 pr-4">Entry</th><th class="pr-4">Tier</th><th class="pr-4">TP</th><th class="pr-4">To-TP (pts)</th><th class="text-right">Floating (pts)</th></tr></thead>
+                        <tbody>
+                            <tr v-for="p in positions" :key="p.tier" class="border-t border-gray-700/60">
+                                <td class="py-1.5 pr-4">{{ fmt(p.entry,2) }}</td>
+                                <td class="pr-4">T{{ p.tier }}</td>
+                                <td class="pr-4">{{ fmt(p.tp,2) }}</td>
+                                <td class="pr-4 text-gray-300">{{ fmt(p.toTp,1) }}</td>
+                                <td class="text-right font-medium" :class="p.floating >= 0 ? 'text-green-400' : 'text-red-400'">{{ (p.floating >= 0 ? '+' : '') + fmt(p.floating,1) }}</td>
+                            </tr>
+                            <tr v-if="positions.length === 0"><td colspan="5" class="py-2 text-gray-500">No open positions.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="sm:hidden space-y-2 mb-2">
+                    <div v-for="p in positions" :key="'m'+p.tier" class="bg-gray-800 border border-gray-700 rounded p-3 flex justify-between items-center">
+                        <span class="text-xs text-gray-300">T{{ p.tier }} {{ fmt(p.entry,2) }} &rarr; TP {{ fmt(p.tp,2) }}</span>
+                        <span class="text-sm font-medium" :class="p.floating >= 0 ? 'text-green-400' : 'text-red-400'">{{ (p.floating >= 0 ? '+' : '') + fmt(p.floating,1) }}</span>
+                    </div>
+                    <p v-if="positions.length === 0" class="text-xs text-gray-500">No open positions.</p>
+                </div>
+                <a :href="eaMetrics.ea_url || 'https://ea-aegis.prasanti.com'" target="_blank" rel="noopener" class="inline-block bg-purple-700 hover:bg-purple-600 px-4 py-2 rounded text-sm font-medium mb-3">🖥 Open MT5 Terminal (VNC)</a>
+                <p class="text-sm mb-6"><span class="text-blue-400 font-medium">Last Action:</span> <span class="text-gray-300">{{ eaMetrics.last_action || '—' }}</span></p>
+                <div class="bg-gray-800 p-4 rounded-lg border border-gray-700 mb-6">
+                    <p class="text-sm text-gray-400 mb-2">Active EA Parameters (live from Bridge)</p>
+                    <p class="text-xs text-gray-300">Lot {{ liveConfig.base_lot_size }} | Grid {{ liveConfig.grid_distance }} pts | EqMult {{ liveConfig.equity_multiplier }} | TP: ATR-tiered | GridEff {{ eaMetrics.grid_eff }} pts | ATR {{ eaMetrics.atr }} | Basket {{ liveConfig.enable_basket_close ? 'ON' : 'OFF' }} | Risk Score {{ liveConfig.risk_score }}</p>
+                </div>
+                <h2 class="text-2xl font-bold mb-6">Data & Analytics</h2>
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 max-w-2xl">
+                    <p class="text-sm text-gray-400 mb-4">Export historical OHLCV + TA indicator data from MT5 for analysis.</p>
+                    <div class="flex flex-col sm:flex-row gap-4 items-end">
+                        <div class="flex-1 w-full">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Lookback Period (Days)</label>
+                            <select v-model="exportPeriod" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                                <option :value="7">1 Week</option>
+                                <option :value="30">1 Month</option>
+                                <option :value="90">3 Months</option>
+                            </select>
+                        </div>
+                        <div class="flex-1 w-full">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Price Basis</label>
+                            <select v-model="exportPrice" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                                <option value="BID">BID (exact history)</option>
+                                <option value="ASK">ASK (bid + current spread)</option>
+                            </select>
+                        </div>
+                        <button @click="triggerExport" :disabled="isExporting" class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-medium">
+                            {{ isExporting ? 'Exporting...' : 'Export Data' }}
+                        </button>
+                        <button @click="downloadCSV" :disabled="!exportReady" class="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-medium">
+                            {{ exportReady ? '⬇️ Download CSV' : 'Waiting...' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'news'">
+                <h2 class="text-2xl font-bold mb-6">News Intelligence</h2>
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 mb-6">
+                    <h3 class="text-lg font-bold mb-4">Scan Controls</h3>
+                    <div class="flex flex-col sm:flex-row gap-4 items-end mb-6">
+                        <div class="flex-1 w-full">
+                            <label class="block text-sm font-medium text-gray-400 mb-1">Scan Schedule (Hours)</label>
+                            <select v-model.number="eaConfig.scan_interval_hours" @change="saveConfig" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                                <option :value="1">Every 1 Hour</option>
+                                <option :value="4">Every 4 Hours</option>
+                                <option :value="8">Every 8 Hours</option>
+                                <option :value="24">Daily</option>
+                            </select>
+                        </div>
+                        <button @click="triggerScan" :disabled="isScanning" class="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white px-4 py-2 rounded font-medium w-full sm:w-auto">
+                            {{ isScanning ? 'Scanning...' : '⚡ Run Scan Now' }}
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Latest Scan Result Display -->
+                <div v-if="scanResult" class="bg-gray-800 p-6 rounded-lg border border-gray-700 mb-6">
+                    <h3 class="text-lg font-bold mb-4">Latest Scan Result</h3>
+                    <div v-if="scanResult.error" class="text-red-400">{{ scanResult.error }}</div>
+                    <div v-else>
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <div class="flex items-center gap-2 mb-1">
+                                    <p class="text-sm text-gray-400">Risk Score</p>
+                                    <span class="text-xs text-gray-500 cursor-help" title="0-100 scale: Lower scores (<40) indicate bullish/low-risk conditions. Higher scores (>70) indicate bearish/high-risk conditions.">ⓘ</span>
+                                </div>
+                                <p class="text-2xl font-bold text-blue-400">{{ scanResult.risk_score || 'N/A' }}<span class="text-sm text-gray-500 font-normal">/100</span></p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-400">Bias</p>
+                                <p class="text-2xl font-bold text-purple-400">{{ scanResult.bias || 'N/A' }}</p>
+                            </div>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-400 mb-2">Verified Sources (full list):</p>
+                            <div class="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                <div v-for="(source, idx) in (scanResult.sources || [])" :key="idx" class="bg-gray-900/60 border border-gray-700 rounded p-3">
+                                    <p class="text-sm text-gray-200">{{ getHeadline(source) }}</p>
+                                    <p class="text-xs text-gray-500 mt-1">{{ source.publisher || 'Unknown publisher' }} &middot; {{ source.publish_timestamp || '' }}</p>
+                                    <p class="text-xs mt-1"><span class="text-gray-400">Keywords:</span> <span class="text-blue-300">{{ (source.matched_keywords || []).join(', ') || 'none' }}</span> <span class="text-gray-400">Sentiment:</span> <span :class="(source.individual_sentiment_score || 0) > 0 ? 'text-green-400' : ((source.individual_sentiment_score || 0) < 0 ? 'text-red-400' : 'text-gray-400')">{{ Math.round((source.individual_sentiment_score || 0) * 100) }}%</span></p>
+                                    <a :href="source.source_url" target="_blank" class="text-xs text-blue-400 hover:underline break-all">{{ source.source_url }}</a>
+                                </div>
+                                <p v-if="!scanResult.sources || scanResult.sources.length === 0" class="text-sm text-gray-500">No sources available.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 mb-6">
+                    <h3 class="text-lg font-bold mb-4">Keywords</h3>
+                    <div class="mb-4">
+                        <p class="text-xs text-gray-500 mb-2">Active (checked):</p>
+                        <div class="flex flex-wrap gap-2">
+                            <label v-for="kw in checkedKeywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-blue-500 cursor-pointer">
+                                <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
+                                <span class="text-sm text-blue-400">{{ kw }}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 mb-2">Inactive (unchecked):</p>
+                        <div class="flex flex-wrap gap-2">
+                            <label v-for="kw in uncheckedKeywords" class="inline-flex items-center bg-gray-900 px-3 py-1 rounded border border-gray-700 cursor-pointer">
+                                <input type="checkbox" :value="kw" v-model="newsConfig.active_keywords" class="mr-2">
+                                <span class="text-sm">{{ kw }}</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                    <h3 class="text-lg font-bold mb-4">RSS Feeds</h3>
+                    <div class="mb-4">
+                        <p class="text-xs text-gray-500 mb-2">Active Feeds:</p>
+                        <div class="space-y-2">
+                            <label v-for="url in checkedRssFeeds" class="flex items-start bg-gray-900 p-2 rounded border border-blue-500 cursor-pointer">
+                                <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
+                                <span class="text-xs break-all text-blue-400">{{ url }}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-500 mb-2">Inactive Feeds:</p>
+                        <div class="space-y-2">
+                            <label v-for="url in uncheckedRssFeeds" class="flex items-start bg-gray-900 p-2 rounded border border-gray-700 cursor-pointer">
+                                <input type="checkbox" :value="url" v-model="newsConfig.active_rss_feeds" class="mt-1 mr-2">
+                                <span class="text-xs break-all">{{ url }}</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'settings'" @input="settingsDirty = true">
+                <h2 class="text-2xl font-bold mb-6">EA Configuration</h2>
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700 max-w-2xl space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Base Lot Size</label>
+                        <input type="number" step="0.01" v-model.number="eaConfig.base_lot_size" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Grid Distance (fallback, pts)</label>
+                        <input type="number" v-model.number="eaConfig.grid_distance" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                        <p class="text-xs text-gray-500 mt-1">Used only when Dynamic Grid is disabled in EA inputs or ATR data is unavailable. Normal live grid = clamp(ATR x riskMult, Grid Min, Grid Max) with gradual tier steps.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Equity Multiplier</label>
+                        <input type="number" v-model.number="eaConfig.equity_multiplier" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    <div class="border-t border-gray-700 pt-4 mt-4">
+                        <h3 class="text-lg font-bold mb-3 text-blue-400">Formula Tuning</h3>
+                        <p class="text-xs text-gray-500 mb-3">Grid gap(k) = G x (1 + Step%/100 x (k-1)), G = clamp(ATR x riskMult, GridMin, GridMax). TP(t) = clamp(ATR x min(T1Mult + Step x (t-1), TMax) x riskFactor, TPMin, TPMax).</p>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                            <div><label class="block text-xs text-gray-400 mb-1">Grid Min</label><input type="number" step="0.1" v-model.number="eaConfig.grid_min" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">Grid Max</label><input type="number" step="0.1" v-model.number="eaConfig.grid_max" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">Grid Step %</label><input type="number" step="0.1" v-model.number="eaConfig.grid_step_pct" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">ATH Thr %</label><input type="number" step="0.01" v-model.number="eaConfig.ath_threshold" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div><label class="block text-xs text-gray-400 mb-1">TP Min</label><input type="number" step="0.1" v-model.number="eaConfig.tp_min" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">TP Max</label><input type="number" step="0.1" v-model.number="eaConfig.tp_max" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">Tier1 Mult</label><input type="number" step="0.05" v-model.number="eaConfig.tp_t1_mult" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">Tier Step</label><input type="number" step="0.05" v-model.number="eaConfig.tp_tier_step" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                            <div><label class="block text-xs text-gray-400 mb-1">Tier Mult Max</label><input type="number" step="0.05" v-model.number="eaConfig.tp_tier_max" class="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm"></div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                            <div>
+                                <p class="text-xs text-gray-400 mb-1">Grid distribution (G = {{ fmt(gridTable.G,1) }} pts at current ATR/Risk; tiers = live Equity cap)</p>
+                                <table class="w-full text-xs"><tbody>
+                                    <tr v-for="r in gridTable.rows" :key="r.pair" class="border-t border-gray-700/60"><td class="py-1 text-gray-400">{{ r.pair }}</td><td class="py-1 text-right text-gray-200">&ge; {{ fmt(r.gap,1) }} pts</td></tr>
+                                </tbody></table>
+                            </div>
+                            <div>
+                                <p class="text-xs text-gray-400 mb-1">TP distribution (per tier, price pts; count = live Equity cap)</p>
+                                <table class="w-full text-xs"><tbody>
+                                    <tr v-for="r in tpTable" :key="r.tier" class="border-t border-gray-700/60"><td class="py-1 text-gray-400">{{ r.tier }}</td><td class="py-1 text-right text-gray-200">{{ fmt(r.tp,1) }} pts</td></tr>
+                                </tbody></table>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-400 bg-gray-900/40 border border-gray-700 rounded p-3">
+                        Take-Profit: tiered volatility targets (ATR x tier multiplier x risk factor), set via EA inputs. Live values appear on the Dashboard card above.
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">ATH Threshold (%)</label>
+                        <input type="number" step="0.01" v-model.number="eaConfig.ath_threshold" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                    </div>
+                    
+                    <div class="border-t border-gray-700 pt-4 mt-4">
+                        <h3 class="text-lg font-bold mb-4 text-blue-400">Basket Close</h3>
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" v-model="eaConfig.enable_basket_close" class="form-checkbox h-5 w-5 text-blue-600">
+                            <span class="text-gray-300">Enable Basket Close (Uses TP parameters above)</span>
+                        </label>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+                        <button @click="saveConfig" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium">1) Apply to EA Now</button>
+                        <button @click="applyAndSaveDefault" class="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded font-medium">2) Apply + Save as New Default</button>
+                    </div>
+                </div>
+            </div>
+            <div v-if="currentTab === 'analytics'">
+                <h2 class="text-2xl font-bold mb-4">Scan Analytics</h2>
+                <div class="flex flex-wrap gap-3 items-end mb-4">
+                    <div><label class="block text-xs text-gray-400 mb-1">Window</label>
+                        <select v-model="analyticsWindow" @change="fetchAnalytics" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="7d">7 days</option><option value="30d">30 days</option><option value="all">All time</option>
+                        </select></div>
+                    <button @click="fetchAnalytics" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">Refresh</button>
+                    <a href="/api/v1/analytics/download" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">Download raw CSV</a>
+                </div>
+                <div v-if="analytics">
+                    <p class="text-sm text-gray-400 mb-4">Scans in window: {{ fmt(analytics.have,0) }} &middot; Distribution {{ analytics.progress.dist }} &middot; Accuracy {{ analytics.progress.acc }}</p>
+                    <div v-if="analytics.stats">
+                        <h3 class="text-lg font-bold mb-2">Score distribution</h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Mean</p><p class="text-xl font-bold text-blue-400">{{ fmt(analytics.stats.mean,1) }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Median</p><p class="text-xl font-bold text-blue-400">{{ fmt(analytics.stats.median,1) }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Std Dev</p><p class="text-xl font-bold text-gray-200">{{ fmt(analytics.stats.std,1) }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">P90</p><p class="text-xl font-bold text-amber-300">{{ fmt(analytics.stats.p90,1) }}</p></div>
+                        </div>
+                        <div class="flex items-end gap-1 h-24 bg-gray-800 p-2 rounded border border-gray-700 mb-1">
+                            <div v-for="b in analytics.histogram" :key="b.bin" :style="{height: Math.max(2, b.count / analytics.dist_max * 100) + '%'}" class="flex-1 bg-blue-500 rounded-t" :title="b.bin + ': ' + b.count"></div>
+                        </div>
+                        <p class="text-xs text-gray-500 mb-4">Histogram bins 0-100, left to right.</p>
+                    </div>
+                    <p v-else class="text-sm text-amber-300 mb-4">Collecting scans for distribution ({{ analytics.progress.dist }}).</p>
+                    <div v-if="analytics.accuracy_ready">
+                        <h3 class="text-lg font-bold mb-2">Accuracy vs actual .ND movement</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Bullish hit-rate (4h)</p><p class="text-xl font-bold text-green-400">{{ analytics.bias_accuracy.bullish_pct === null ? 'n/a' : fmt(analytics.bias_accuracy.bullish_pct,1) + '%' }}</p><p class="text-xs text-gray-500">n={{ analytics.bias_accuracy.n_bull }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Bearish hit-rate (4h)</p><p class="text-xl font-bold text-red-400">{{ analytics.bias_accuracy.bearish_pct === null ? 'n/a' : fmt(analytics.bias_accuracy.bearish_pct,1) + '%' }}</p><p class="text-xs text-gray-500">n={{ analytics.bias_accuracy.n_bear }}</p></div>
+                            <div class="bg-gray-800 p-3 rounded border border-gray-700"><p class="text-xs text-gray-400">Neutral flat-rate (4h)</p><p class="text-xl font-bold text-gray-200">{{ analytics.bias_accuracy.neutral_flat_pct === null ? 'n/a' : fmt(analytics.bias_accuracy.neutral_flat_pct,1) + '%' }}</p><p class="text-xs text-gray-500">n={{ analytics.bias_accuracy.n_neut }}</p></div>
+                        </div>
+                        <div class="bg-gray-800 p-3 rounded border border-gray-700 text-sm space-y-1 text-gray-300">
+                            <p>Corr(score, 1h return): <span class="text-blue-300">{{ corr(analytics.correlations.h1) }}</span></p>
+                            <p>Corr(score, 4h return): <span class="text-blue-300">{{ corr(analytics.correlations.h4) }}</span></p>
+                            <p>Corr(score, 24h return): <span class="text-blue-300">{{ corr(analytics.correlations.h24) }}</span></p>
+                            <p>Corr(score, |4h return| = volatility): <span class="text-blue-300">{{ corr(analytics.correlations.vol) }}</span></p>
+                        </div>
+                    </div>
+                    <p v-else class="text-sm text-amber-300">Collecting aged scan pairs for accuracy ({{ analytics.progress.acc }}). Accuracy only uses scans old enough that their forward horizon has fully elapsed.</p>
+                </div>
+                <p v-else class="text-sm text-gray-500">No analytics yet. Reports unlock automatically: distribution at 50 scans, accuracy at 100 aged pairs.</p>
+            </div>
+        
+            <!-- User Management Tab -->
+            <div v-if="currentTab === 'users'" class="space-y-6">
+                <h2 class="text-2xl font-bold mb-4">User Management</h2>
+                
+                <!-- Add/Update User Form -->
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                    <h3 class="text-lg font-bold mb-3">Add / Update User</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <input type="email" v-model="newUserEmail" placeholder="email@example.com" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                        <select v-model="newUserRole" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500">
+                            <option value="fund_manager">Fund Manager</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                        <button @click="addUser(newUserEmail, newUserRole)" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium transition">Add / Update</button>
+                    </div>
+                </div>
+
+                <!-- Users Table -->
+                <div class="bg-gray-800 p-6 rounded-lg border border-gray-700">
+                    <h3 class="text-lg font-bold mb-3">Registered Users</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-gray-400 border-b border-gray-700">
+                                <tr>
+                                    <th class="py-3 px-2">Email</th>
+                                    <th class="py-3 px-2">Role</th>
+                                    <th class="py-3 px-2">Status</th>
+                                    <th class="py-3 px-2 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="u in allUsers" :key="u.email" class="border-b border-gray-700/60 hover:bg-gray-700/30">
+                                    <td class="py-3 px-2">{{ u.email }}</td>
+                                    <td class="py-3 px-2">
+                                        <span :class="u.role === 'admin' ? 'text-purple-400' : 'text-blue-400'" class="capitalize">{{ u.role.replace('_', ' ') }}</span>
+                                    </td>
+                                    <td class="py-3 px-2">
+                                        <span :class="u.enabled ? 'text-green-400' : 'text-red-400'">{{ u.enabled ? 'Active' : 'Disabled' }}</span>
+                                    </td>
+                                    <td class="py-3 px-2 text-right">
+                                        <button @click="removeUser(u.email)" class="text-red-400 hover:text-red-300 text-xs font-medium transition">Remove</button>
+                                    </td>
+                                </tr>
+                                <tr v-if="!allUsers || allUsers.length === 0">
+                                    <td colspan="4" class="py-6 text-center text-gray-500">No users found. Add one above.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="/static/app.js?v=1792955775"></script>
+</body>
+</html>

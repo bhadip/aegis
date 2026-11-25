@@ -1,0 +1,98 @@
+{
+  "active_profile": "XAUUSD",
+  "global": {
+    "event_telegram_alert_mins": 15,
+    "event_dashboard_past_mins": 120
+  },
+  "profiles": {
+    "ND100": {
+      "symbol": ".ND",
+      "schedule_hours": 4,
+      "busy_hours_start_sgt": 16,
+      "busy_hours_end_sgt": 5,
+      "busy_interval_mins": 30,
+      "quiet_interval_mins": 180,
+      "default_keywords": [
+        "Tech",
+        "AI",
+        "Earnings",
+        "FOMC",
+        "Powell",
+        "Semiconductor",
+        "Cloud",
+        "Software",
+        "Apple",
+        "Microsoft",
+        "Nvidia"
+      ],
+      "active_keywords": [
+        "Tech",
+        "AI",
+        "Earnings",
+        "FOMC",
+        "Powell",
+        "Semiconductor"
+      ],
+      "custom_keywords": [],
+      "auto_keywords": [],
+      "default_feeds": [
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        "https://www.investing.com/rss/news.rss"
+      ],
+      "active_feeds": [
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "https://www.investing.com/rss/news.rss"
+      ],
+      "custom_feeds": []
+    },
+    "XAUUSD": {
+      "symbol": "XAUUSD",
+      "schedule_hours": 2,
+      "busy_hours_start_sgt": 16,
+      "busy_hours_end_sgt": 5,
+      "busy_interval_mins": 30,
+      "quiet_interval_mins": 180,
+      "default_keywords": [
+        "Inflation",
+        "Fed",
+        "Interest Rates",
+        "DXY",
+        "Dollar Index",
+        "Treasury Yields",
+        "Safe Haven",
+        "Geopolitics",
+        "CPI",
+        "NFP",
+        "Central Bank",
+        "Gold ETF",
+        "Mining",
+        "Silver",
+        "Oil",
+        "BRICS"
+      ],
+      "active_keywords": [
+        "Inflation",
+        "Fed",
+        "Interest Rates",
+        "DXY",
+        "Treasury Yields",
+        "Safe Haven",
+        "CPI",
+        "NFP"
+      ],
+      "custom_keywords": [],
+      "auto_keywords": [],
+      "default_feeds": [
+        "https://www.forexlive.com/feed/",
+        "https://www.investing.com/rss/commodities.rss",
+        "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+      ],
+      "active_feeds": [
+        "https://www.forexlive.com/feed/",
+        "https://www.investing.com/rss/commodities.rss"
+      ],
+      "custom_feeds": []
+    }
+  }
+}
