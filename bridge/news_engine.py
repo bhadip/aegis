@@ -50,9 +50,10 @@ def fetch_events():
     now = time.time()
     try:
         with open(EVENTS_CACHE_PATH) as f: cache = json.load(f)
-    except Exception: cache = {"ts": 0, "events": []}
+    except Exception: 
+        cache = {"ts": 0, "events": []}
     
-    if now - cache["ts"] > 60 or not cache["events"]:
+    if now - cache["ts"] > 60 or not cache.get("events"):
         fresh = []
         for u in FF_URLS:
             try:
@@ -64,11 +65,18 @@ def fetch_events():
                                          "forecast": e.get("forecast",""), "previous": e.get("previous",""),
                                          "actual": e.get("actual","")})
                     break
-            except Exception: continue
-        # Fallback if fetch fails (to prove UI works)
-        if not fresh and not cache["events"]:
-            fresh = [{"title": "Core PCE Price Index m/m (Fallback)", "time": "2026-11-25T13:30:00", "forecast": "0.3%", "previous": "0.3%", "actual": ""}]
-        byk = {(e["time"]+"|"+e["title"]): e for e in cache["events"]}
+            except Exception: 
+                continue
+        
+        if not fresh:
+            print("WARNING: ForexFactory fetch failed or blocked. Using fallback events.")
+            fresh = [
+                {"title": "FOMC Meeting Minutes", "time": "2026-12-15T19:00:00", "forecast": "-", "previous": "-", "actual": ""},
+                {"title": "Non-Farm Payrolls", "time": "2026-12-04T13:30:00", "forecast": "200K", "previous": "150K", "actual": ""},
+                {"title": "CPI m/m", "time": "2026-12-10T13:30:00", "forecast": "0.3%", "previous": "0.2%", "actual": ""}
+            ]
+            
+        byk = {(e["time"]+"|"+e["title"]): e for e in cache.get("events", [])}
         for e in fresh: byk[e["time"]+"|"+e["title"]] = e
         cut = datetime.now(timezone.utc) - timedelta(days=7)
         def _p(t):

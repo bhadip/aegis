@@ -88,6 +88,14 @@ def require_admin(request: Request):
     return user
 
 
+import news_engine
+
+import news_engine
+
+import news_engine
+
+import news_engine
+
 app = FastAPI(title="ExaGuard AEGIS Bridge API v0.7.1")
 
 account_status = {"equity": 0.0, "balance": 0.0, "margin_level": 0.0, "active_positions": 0, "status": "Disconnected"}
@@ -181,6 +189,12 @@ async def run_scan_logic():
                 ea_config["SCAN_BIAS"] = str(agent_bias)
                 print("SCAN audit: no scored articles, used agent values:", agent_risk, agent_bias)
             ea_config["SCAN_ID"] = str(int(time.time()))
+        profile_name = "ND100"
+        try:
+            import news_engine
+            profile_name = news_engine.load_config().get("active_profile", "ND100")
+        except Exception:
+            pass
             from email.utils import parsedate_to_datetime
             import datetime as _dtm
             def _sort_key(item):
@@ -198,7 +212,8 @@ async def run_scan_logic():
             last_scan_result = {
                 "risk_score": risk_score,
                 "bias": (bias + " Bias") if (bias != "N/A" and not str(bias).endswith("Bias")) else bias,
-                "sources": sources_list
+                "sources": sources_list,
+            "profile": profile_name
             }
             last_scan_time = datetime.now(timezone.utc).isoformat()
 
@@ -206,13 +221,13 @@ async def run_scan_logic():
                 ea_config["RISK_SCORE"] = str(risk_score)
 
             heads = [str(a.get('headline', a.get('title', 'N/A'))) for a in sources_list[:10]]
-            def build_msg(hl):
+            def build_msg(hl, profile="ND100"):
                 body = "\n".join([f"- {h}" for h in hl])
-                return f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
-            msg = build_msg(heads)
+                return f"📰 *News Scan Completed ({profile})*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
+            msg = build_msg(heads, profile_name)
             while len(msg) > 4000 and heads:
                 heads.pop()
-                msg = build_msg(heads)
+                msg = build_msg(heads, profile_name)
             send_telegram(msg)
     except Exception as e:
         last_scan_result = {"error": str(e)}
@@ -518,6 +533,42 @@ def analytics_download():
     if os.path.exists(LOG_PATH):
         return FileResponse(LOG_PATH, media_type='text/csv', filename='score_log.csv')
     raise HTTPException(status_code=404, detail='No log yet')
+
+import news_engine
+
+app.include_router(news_engine.router_events)
+app.include_router(news_engine.router_admin)
+try:
+    news_engine.start_engine()
+except Exception as e:
+    print("engine start failed:", e)
+
+import news_engine
+
+app.include_router(news_engine.router_events)
+app.include_router(news_engine.router_admin)
+try:
+    news_engine.start_engine()
+except Exception as e:
+    print("engine start failed:", e)
+
+import news_engine
+
+app.include_router(news_engine.router_events)
+app.include_router(news_engine.router_admin)
+try:
+    news_engine.start_engine()
+except Exception as e:
+    print("engine start failed:", e)
+
+import news_engine
+
+app.include_router(news_engine.router_events)
+app.include_router(news_engine.router_admin)
+try:
+    news_engine.start_engine()
+except Exception as e:
+    print("engine start failed:", e)
 
 app.mount("/static", StaticFiles(directory="web-ui"), name="static")
 

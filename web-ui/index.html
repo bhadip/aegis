@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ExaGuard AEGIS</title>
+    <title><img src="/static/logo.png" class="w-6 h-6 inline mr-2 rounded">ExaGuard AEGIS</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -205,6 +205,7 @@
                             <option :value="8">Every 8 hours</option>
                             <option :value="24">Daily</option>
                         </select>
+                        <button @click="saveNewsConfig" class="bg-green-600 hover:bg-green-700 px-4 py-1 rounded text-sm mr-2">💾 Save Config</button>
                         <button @click="triggerScan" class="bg-blue-600 hover:bg-blue-700 px-4 py-1 rounded text-sm ml-auto">⚡ Run Scan Now</button>
                     </div>
 
@@ -396,6 +397,6 @@
             </div>
         </main>
     </div>
-    <script src="/static/app.js?v=0.14.7"></script>
+    <script src="/static/app.js?v=0.14.10"></script>
 </body>
 </html>
