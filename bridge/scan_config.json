@@ -8,10 +8,6 @@
     "ND100": {
       "symbol": ".ND",
       "schedule_hours": 4,
-      "busy_hours_start_sgt": 16,
-      "busy_hours_end_sgt": 5,
-      "busy_interval_mins": 30,
-      "quiet_interval_mins": 180,
       "default_keywords": [
         "Tech",
         "AI",
@@ -34,7 +30,6 @@
         "Semiconductor"
       ],
       "custom_keywords": [],
-      "auto_keywords": [],
       "default_feeds": [
         "https://www.cnbc.com/id/100003114/device/rss/rss.html",
         "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
@@ -49,10 +44,6 @@
     "XAUUSD": {
       "symbol": "XAUUSD",
       "schedule_hours": 2,
-      "busy_hours_start_sgt": 16,
-      "busy_hours_end_sgt": 5,
-      "busy_interval_mins": 30,
-      "quiet_interval_mins": 180,
       "default_keywords": [
         "Inflation",
         "Fed",
@@ -82,7 +73,6 @@
         "NFP"
       ],
       "custom_keywords": [],
-      "auto_keywords": [],
       "default_feeds": [
         "https://www.forexlive.com/feed/",
         "https://www.investing.com/rss/commodities.rss",

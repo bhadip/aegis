@@ -131,9 +131,11 @@ async def run_scan_logic():
         async with httpx.AsyncClient() as client:
             trigger_resp = await client.get("http://aegis-news:8000/api/v1/news/scan", timeout=45.0)
             trigger_resp.raise_for_status()
+
             status_resp = await client.get("http://aegis-news:8000/api/v1/news/status", timeout=15.0)
             status_resp.raise_for_status()
             data = status_resp.json()
+
             articles = []
             agent_risk = "N/A"
             agent_bias = "N/A"
@@ -179,11 +181,6 @@ async def run_scan_logic():
                 ea_config["SCAN_BIAS"] = str(agent_bias)
                 print("SCAN audit: no scored articles, used agent values:", agent_risk, agent_bias)
             ea_config["SCAN_ID"] = str(int(time.time()))
-            profile_name = news_engine.load_config().get("active_profile", "ND100")
-            import hashlib as _h, json as _j
-            _hh = _h.md5(_j.dumps(sorted([str(x.get("source_url") or x.get("headline")) for x in deduped])).encode()).hexdigest()
-            news_engine.record_stale(profile_name, _hh)
-            _st = news_engine.get_stale(profile_name)
             from email.utils import parsedate_to_datetime
             import datetime as _dtm
             def _sort_key(item):
@@ -201,25 +198,22 @@ async def run_scan_logic():
             last_scan_result = {
                 "risk_score": risk_score,
                 "bias": (bias + " Bias") if (bias != "N/A" and not str(bias).endswith("Bias")) else bias,
-                "sources": sources_list,
-                "profile": profile_name
+                "sources": sources_list
             }
             last_scan_time = datetime.now(timezone.utc).isoformat()
+
             if risk_score != "N/A":
                 ea_config["RISK_SCORE"] = str(risk_score)
+
             heads = [str(a.get('headline', a.get('title', 'N/A'))) for a in sources_list[:10]]
-            def build_msg(hl, profile="ND100"):
+            def build_msg(hl):
                 body = "\n".join([f"- {h}" for h in hl])
-                return f"📰 *News Scan Completed ({profile})*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
-            msg = build_msg(heads, profile_name)
+                return f"📰 *News Scan Completed*\nRisk Score: *{risk_score}/100*\nBias: *{bias}*{sent_line}\n\n*Headlines:*\n{body}"
+            msg = build_msg(heads)
             while len(msg) > 4000 and heads:
                 heads.pop()
-                msg = build_msg(heads, profile_name)
-            if _st.get("stale"):
-                _hrs = _st.get("hours", 0)
-                send_telegram(f"⚠️ Scan unchanged for {_hrs}h ({profile_name}) - Risk {risk_score}/100 {bias}")
-            else:
-                send_telegram(msg)
+                msg = build_msg(heads)
+            send_telegram(msg)
     except Exception as e:
         last_scan_result = {"error": str(e)}
         last_scan_time = datetime.now(timezone.utc).isoformat()
@@ -342,14 +336,6 @@ def update_config(config: ConfigUpdate):
     ea_config["TP_TIER_MAX"] = str(config.tp_tier_max)
     return {"status": "success"}
 
-@app.api_route("/api/v1/news/scan", methods=["GET", "POST"])
-async def trigger_scan(user: dict = Depends(require_auth)):
-    # Fire-and-forget: acknowledge immediately, scan runs in background
-    if scan_in_progress:
-        return {"status": "already_running"}
-    asyncio.create_task(run_scan_logic())
-    return {"status": "scan_started"}
-
 app.include_router(news_engine.router_events)
 app.include_router(news_engine.router_admin)
 try:
@@ -362,6 +348,26 @@ async def internal_scan(profile: str, request: Request):
     cfg = news_engine.load_config(); cfg["active_profile"]=profile; news_engine.save_config(cfg)
     if scan_in_progress: return {"status":"already_running"}
     asyncio.create_task(run_scan_logic()); return {"status":"scan_started"}
+
+@app.get("/api/v1/news/config")
+async def get_news_config():
+    return news_engine.profile_payload()
+
+@app.post("/api/v1/news/config")
+async def save_news_config(data: dict, user: dict = Depends(require_auth)):
+    return news_engine.save_profile_payload(data, user.get("role","viewer"))
+
+@app.post("/api/v1/news/profile")
+async def switch_profile(data: dict, user: dict = Depends(require_auth)):
+    return news_engine.api_switch_profile(data)
+
+@app.api_route("/api/v1/news/scan", methods=["GET", "POST"])
+async def trigger_scan(user: dict = Depends(require_auth)):
+    # Fire-and-forget: acknowledge immediately, scan runs in background
+    if scan_in_progress:
+        return {"status": "already_running"}
+    asyncio.create_task(run_scan_logic())
+    return {"status": "scan_started"}
 
 @app.get("/api/v1/news/config")
 async def get_news_config():

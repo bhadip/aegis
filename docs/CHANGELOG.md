@@ -1,3 +1,13 @@
+## v0.14.7 (2026-11-25)
+- **Multi-Profile Support**: Added ND100 and XAUUSD scan profiles with independent schedules.
+- **UI Updates**: 
+  - Version number now syncs with code version (SOP).
+  - Added favicon/icon to browser tab.
+  - Restructured News Intelligence tab into "Economic Events" and "News Scan" cards.
+- **Backend**: 
+  - Wired `news_engine` for profile management and event fetching.
+  - Added account number display on Dashboard.
+
 # AEGIS Changelog
 
 ## v0.14.2 (2026-11-25)
